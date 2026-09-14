@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml"><img src="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml/badge.svg" alt="Windows CI" /></a>
   <a href="https://github.com/honghao919/QHHDesktopStorageBox/releases/latest"><img src="https://img.shields.io/github/v/release/honghao919/QHHDesktopStorageBox?display_name=tag" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/version-1.3.13-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.3.14-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" alt="License" />
   <img src="https://img.shields.io/badge/docs%20%26%20assets-CC%20BY--NC--SA%204.0-lightgrey" alt="Docs & Assets License" />
   <img src="https://img.shields.io/badge/.NET-10.0-purple" alt=".NET" />
@@ -27,6 +27,8 @@ English: QHH Desktop Storage Box is a lightweight Windows desktop file drawer bu
 - **待办收纳盒** — 支持添加、完成和归档；双击内容、按 F2 或点击编辑按钮修改事项，Enter 保存、Esc 取消；删除单项后可在 10 秒内撤销
 - **像素收纳盒** — 像素风格的收纳盒，为桌面增添趣味
 - **桌面浮动窗口** — 每个收纳盒显示为精美的浮动桌面窗口，支持自由拖放定位
+- **普通盒网格/列表视图** — 普通盒和像素盒可分别切换网格图标或紧凑列表视图
+- **系统应用收纳** — 可从开始菜单应用选择器加入，也可尝试从开始菜单直接拖入；UWP 应用保存 Windows 应用标识，传统程序保存绝对路径引用
 - **窗口位置记忆** — 自动记住每个收纳盒在桌面上的位置
 - **窗口卷起** — 可手动将普通和映射收纳盒收起到标题栏，并记住每个盒子的卷起状态
 - **系统图标** — 拖入的文件显示系统原生图标
@@ -116,6 +118,7 @@ English: QHH Desktop Storage Box is a lightweight Windows desktop file drawer bu
 - 将文件或文件夹直接拖入收纳盒即可开始使用。
 - **普通收纳盒**会把文件或文件夹实际移动到 QHH Desktop Storage Box 的数据目录，适合由应用统一管理的临时文件。
 - **映射收纳盒**只保存源文件的绝对路径，不移动、复制或删除源文件，适合项目目录、工作目录以及经常被其他程序使用的文件。
+- **系统应用**不以文件形式搬入应用数据目录。传统程序保存可执行文件路径引用，UWP/商店应用保存 `shell:AppsFolder` 应用标识；卸载系统应用后引用可能失效。
 - 建议文件夹尽量使用映射收纳盒，避免移动大量文件或正在使用的文件；需要保留文件原位置时，请优先选择映射收纳盒。
 - 待办的“清单完成率”统计当前盒内所有未归档事项，不按日期筛选；归档会将已完成事项移出统计。单项删除撤销仅在应用运行期间有效，删除整个待办盒会同时删除归档历史且无法撤销。
 - Windows 10 暂时可能有部分功能不兼容，建议优先使用 Windows 11。

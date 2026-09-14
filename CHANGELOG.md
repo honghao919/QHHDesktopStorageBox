@@ -3,25 +3,13 @@
 All notable changes are documented here. The product version is defined in
 `Directory.Build.props`.
 
-## [Unreleased]
+## [1.3.14] - 2026-09-14
 
 ### Added
 
-- Windows CI for restore, Release build, and the full test suite.
-- Manual-release workflow with environment approval and optional Authenticode
-  signing.
-- Versioned database safety backups before schema upgrades.
-- One-click ZIP export of the database and normal-box storage.
-- Mapping and smart-box broken-reference scanning.
-- Dependabot, issue forms, pull request template, contribution guide, and
-  security policy.
-
-### Changed
-
-- Updates now require a published SHA-256 checksum before extraction.
-- Release downloads are limited to explicit GitHub-owned asset hosts.
-- README now documents installation, uninstallation, data locations, privacy,
-  recovery, and known limitations.
+- Normal and pixel boxes can switch between grid and list views per box.
+- Installed application picker and Start-menu drop support for normal and mapping
+  boxes without copying or moving system files.
 
 ## [1.3.13] - 2026-09-14
 

@@ -100,6 +100,27 @@ public sealed class DesktopBoxWindowTemplateTests
             sources);
     }
 
+    [Fact]
+    public void HeaderViewControls_AreAvailableForGridBackedBoxes()
+    {
+        var document = XDocument.Load(GetDesktopBoxWindowXamlPath());
+        var viewModeTrigger = Assert.Single(
+            document.Descendants(PresentationNamespace + "DataTrigger"),
+            element =>
+                (string?)element.Attribute("Binding") == "{Binding SupportsViewMode}"
+                && (string?)element.Attribute("Value") == "True");
+        Assert.NotNull(viewModeTrigger.Parent?.Parent?.Parent);
+        Assert.Contains(
+            document.Descendants(PresentationNamespace + "Button"),
+            button => (string?)button.Attribute("Click") == "OnUseMappingGridModeClick");
+        Assert.Contains(
+            document.Descendants(PresentationNamespace + "Button"),
+            button => (string?)button.Attribute("Click") == "OnUseMappingListModeClick");
+        Assert.Contains(
+            document.Descendants(PresentationNamespace + "Button"),
+            button => (string?)button.Attribute("Click") == "OnAddInstalledApplicationClick");
+    }
+
     private static Thickness ParseThickness(string? value) =>
         (Thickness)new ThicknessConverter().ConvertFromInvariantString(value ?? "0")!;
 

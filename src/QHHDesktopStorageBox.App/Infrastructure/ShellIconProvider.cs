@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using QHHDesktopStorageBox.Core.Models;
 
 namespace QHHDesktopStorageBox.App.Infrastructure;
 
@@ -36,7 +37,9 @@ public static class ShellIconProvider
             return Task.FromResult<ImageSource?>(null);
         }
 
-        var fullPath = Path.GetFullPath(path);
+        var fullPath = InstalledApplicationReference.IsReference(path)
+            ? path.Trim()
+            : Path.GetFullPath(path);
         size = Math.Clamp(
             size,
             DpiAwareIconSize.MinimumSourcePixelSize,
@@ -110,6 +113,11 @@ public static class ShellIconProvider
 
     private static ImageSource? GetIcon(string fullPath, bool isDirectory, int size)
     {
+        if (InstalledApplicationReference.IsReference(fullPath))
+        {
+            return TryGetShellItemIcon(fullPath, size, allowShellNamespace: true);
+        }
+
         if (!isDirectory && IsShortcut(fullPath))
         {
             foreach (var candidate in GetShortcutIconCandidates(fullPath))
@@ -240,9 +248,12 @@ public static class ShellIconProvider
         }
     }
 
-    private static ImageSource? TryGetShellItemIcon(string path, int size)
+    private static ImageSource? TryGetShellItemIcon(
+        string path,
+        int size,
+        bool allowShellNamespace = false)
     {
-        if (!File.Exists(path) && !Directory.Exists(path))
+        if (!allowShellNamespace && !File.Exists(path) && !Directory.Exists(path))
         {
             return null;
         }

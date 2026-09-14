@@ -27,7 +27,9 @@ public partial class DrawerItemContextMenuWindow : Window
 
     internal DrawerItemContextMenuWindow(
         bool showRunAsAdministrator,
+        bool showReveal,
         bool isMappingBox,
+        bool isInstalledApplication,
         bool isPixelStyle,
         int screenX,
         int screenY)
@@ -44,10 +46,13 @@ public partial class DrawerItemContextMenuWindow : Window
 
         RunAsAdministratorButton.Visibility =
             showRunAsAdministrator ? Visibility.Visible : Visibility.Collapsed;
-        RemoveButton.Content = isMappingBox ? "移除引用" : "移出收纳盒";
+        RevealButton.Visibility = showReveal ? Visibility.Visible : Visibility.Collapsed;
+        RemoveButton.Content = isInstalledApplication
+            ? "移除应用"
+            : isMappingBox ? "移除引用" : "移出收纳盒";
         System.Windows.Automation.AutomationProperties.SetName(
             RemoveButton,
-            isMappingBox ? "移除引用" : "移出收纳盒");
+            (string)RemoveButton.Content);
 
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;

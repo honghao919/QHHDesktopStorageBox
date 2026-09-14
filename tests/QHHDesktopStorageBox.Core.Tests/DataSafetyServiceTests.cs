@@ -24,7 +24,7 @@ public sealed class DataSafetyServiceTests
             var store = new StorageLocationStore(Path.Combine(root, "storage-location.json"));
             var service = new DataSafetyService(paths, repository, store);
 
-            var result = await service.CreateBackupAsync(destination, "1.3.13");
+            var result = await service.CreateBackupAsync(destination, "1.3.14");
 
             Assert.True(File.Exists(destination));
             Assert.True(result.SizeBytes > 0);
@@ -68,7 +68,7 @@ public sealed class DataSafetyServiceTests
             var store = new StorageLocationStore(
                 Path.Combine(bootstrapRoot, StorageLocationStore.ConfigFileName));
             var service = new DataSafetyService(paths, repository, store);
-            await service.CreateBackupAsync(archivePath, "1.3.13");
+            await service.CreateBackupAsync(archivePath, "1.3.14");
 
             var restoredPaths = await service.RestoreBackupAsync(archivePath, targetRoot);
 

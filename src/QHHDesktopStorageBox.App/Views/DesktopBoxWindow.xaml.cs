@@ -14,6 +14,7 @@ using QHHDesktopStorageBox.App.Features.ItemContextMenu;
 using QHHDesktopStorageBox.App.Infrastructure;
 using QHHDesktopStorageBox.App.ViewModels;
 using QHHDesktopStorageBox.Core.Services;
+using QHHDesktopStorageBox.Native.Applications;
 using QHHDesktopStorageBox.Native.Windows;
 
 namespace QHHDesktopStorageBox.App.Views;
@@ -90,6 +91,7 @@ public partial class DesktopBoxWindow : Window
         _itemContextMenu = new DrawerItemContextMenuCoordinator(viewModel);
         DataContext = viewModel;
         viewModel.ImportPreflightRequested += OnImportPreflightRequested;
+        viewModel.ActiveItemsListSelectionRequested += OnActiveItemsListSelectionRequested;
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
@@ -1070,6 +1072,7 @@ public partial class DesktopBoxWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         ViewModel.ImportPreflightRequested -= OnImportPreflightRequested;
+        ViewModel.ActiveItemsListSelectionRequested -= OnActiveItemsListSelectionRequested;
         ViewModel.Undo.Clear();
         SourceInitialized -= OnSourceInitialized;
         Loaded -= OnLoaded;
@@ -1091,6 +1094,12 @@ public partial class DesktopBoxWindow : Window
         }
 
         base.OnClosed(e);
+    }
+
+    private void OnActiveItemsListSelectionRequested(DrawerItemViewModel item)
+    {
+        ActiveItemsList.SelectedItem = item;
+        _keyboardDeleteTarget = item;
     }
 
     private void OnImportPreflightRequested(
@@ -1476,10 +1485,30 @@ public partial class DesktopBoxWindow : Window
         await SwitchMappingViewModeAsync(useListMode: true);
     }
 
+    private async void OnAddInstalledApplicationClick(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.SupportsInstalledApplications)
+        {
+            return;
+        }
+
+        var picker = new ApplicationPickerWindow
+        {
+            Owner = this
+        };
+        if (picker.ShowDialog() != true
+            || picker.SelectedApplication is not { } application)
+        {
+            return;
+        }
+
+        await ViewModel.AddInstalledApplicationAsync(application.Name, application.AppId);
+    }
+
     private async Task SwitchMappingViewModeAsync(bool useListMode)
     {
         if (_isMappingViewTransitioning
-            || !ViewModel.IsMappingBox
+            || !ViewModel.SupportsViewMode
             || ViewModel.IsMappingListMode == useListMode)
         {
             return;
@@ -1718,8 +1747,15 @@ public partial class DesktopBoxWindow : Window
         }
         else
         {
-            var dropEffect = ChooseFileDropEffect(e.AllowedEffects);
-            acceptsDrop = e.Data.GetDataPresent(DataFormats.FileDrop) && dropEffect != DragDropEffects.None;
+            var isInstalledApplication =
+                ViewModel.SupportsInstalledApplications
+                && TryGetDroppedInstalledApplication(e.Data, out _);
+            var dropEffect = isInstalledApplication
+                ? DragDropEffects.Link
+                : ChooseFileDropEffect(e.AllowedEffects);
+            acceptsDrop = isInstalledApplication
+                || (e.Data.GetDataPresent(DataFormats.FileDrop)
+                    && dropEffect != DragDropEffects.None);
             // 固定模式（硬约束）：盒已满时拒绝拖入文件。
             if (acceptsDrop && !ViewModel.HasFreeSlotForDrop())
             {
@@ -1798,7 +1834,8 @@ public partial class DesktopBoxWindow : Window
         }
 
         if (!e.Data.GetDataPresent(InternalDrawerItemDragFormat)
-            && !e.Data.GetDataPresent(DataFormats.FileDrop))
+            && !e.Data.GetDataPresent(DataFormats.FileDrop)
+            && !TryGetDroppedInstalledApplication(e.Data, out _))
         {
             return;
         }
@@ -1829,6 +1866,22 @@ public partial class DesktopBoxWindow : Window
                         $"Failed to complete internal drop for box {ViewModel.BoxId:N}.");
                 }
 
+                return;
+            }
+
+            if (TryGetDroppedInstalledApplication(e.Data, out var installedApplication)
+                && installedApplication is not null)
+            {
+                if (!ViewModel.SupportsInstalledApplications)
+                {
+                    e.Effects = DragDropEffects.None;
+                    return;
+                }
+
+                e.Effects = DragDropEffects.Link;
+                await ViewModel.AddInstalledApplicationAsync(
+                    installedApplication.Name,
+                    installedApplication.AppId);
                 return;
             }
 
@@ -2491,6 +2544,45 @@ public partial class DesktopBoxWindow : Window
             : (allowedEffects & DragDropEffects.Link) == DragDropEffects.Link
                 ? DragDropEffects.Link
                 : DragDropEffects.None;
+    }
+
+    private static bool TryGetDroppedInstalledApplication(
+        IDataObject data,
+        out InstalledApplicationInfo? application)
+    {
+        application = null;
+        if (!data.GetDataPresent(InstalledApplicationCatalog.ShellIdListDataFormat))
+        {
+            return false;
+        }
+
+        var rawData = data.GetData(InstalledApplicationCatalog.ShellIdListDataFormat);
+        var bytes = rawData switch
+        {
+            byte[] byteArray => byteArray,
+            MemoryStream memoryStream => memoryStream.ToArray(),
+            Stream stream => ReadStream(stream),
+            _ => null
+        };
+        return InstalledApplicationCatalog.TryResolveShellIdList(bytes, out application);
+    }
+
+    private static byte[] ReadStream(Stream stream)
+    {
+        var originalPosition = stream.CanSeek ? stream.Position : 0;
+        if (stream.CanSeek)
+        {
+            stream.Position = 0;
+        }
+
+        using var memoryStream = new MemoryStream();
+        stream.CopyTo(memoryStream);
+        if (stream.CanSeek)
+        {
+            stream.Position = originalPosition;
+        }
+
+        return memoryStream.ToArray();
     }
 
     internal static void MarkDroppedInsideQHHDesktopStorageBox(DesktopBoxDragPayload payload)

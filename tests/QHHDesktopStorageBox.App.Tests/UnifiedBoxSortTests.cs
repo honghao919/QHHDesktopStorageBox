@@ -247,6 +247,43 @@ public sealed class UnifiedBoxSortTests
         }
     }
 
+    [Fact]
+    public async Task NormalBox_GridAndListViewModesPersistPerBox()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            var (drawerService, repository) = await CreateDrawerServiceAsync(root);
+            var normalBox = await drawerService.CreateBoxAsync("普通盒", BoxType.Normal);
+            var mappingBox = await drawerService.CreateBoxAsync("映射盒", BoxType.Mapping);
+            var normal = CreateViewModel(normalBox, drawerService, repository);
+
+            Assert.True(normal.SupportsViewMode);
+            Assert.True(normal.IsGridMode);
+
+            await normal.UseMappingListModeCommand.ExecuteAsync(null);
+
+            Assert.True(normal.IsListMode);
+            Assert.True(normal.IsMappingListMode);
+            Assert.Equal(
+                "List",
+                await drawerService.GetSettingAsync(
+                    DesktopBoxViewModel.GetViewModeSettingKey(normalBox.Id)));
+
+            var restored = CreateViewModel(normalBox, drawerService, repository);
+            await restored.LoadMappingViewModeAsync();
+            Assert.True(restored.IsListMode);
+
+            var mapping = CreateViewModel(mappingBox, drawerService, repository);
+            await mapping.LoadMappingViewModeAsync();
+            Assert.True(mapping.IsGridMode);
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
     private static DesktopBoxViewModel CreateViewModel(
         Box box,
         DrawerService drawerService,
