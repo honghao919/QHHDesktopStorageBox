@@ -1,0 +1,1510 @@
+using System.Diagnostics;
+using System.ComponentModel;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using QHHDesktopStorageBox.App.Infrastructure;
+using QHHDesktopStorageBox.App.ViewModels;
+using QHHDesktopStorageBox.App.Views;
+using QHHDesktopStorageBox.Core.Logging;
+using QHHDesktopStorageBox.Core.Services;
+using QHHDesktopStorageBox.Native.HotKeys;
+using QHHDesktopStorageBox.Native.Windows;
+
+namespace QHHDesktopStorageBox.App;
+
+public partial class MainWindow : Window
+{
+    private const string InternalDrawerItemDragFormat = "QHHDesktopStorageBox.DesktopBoxItem";
+    private const string BoxListDragFormat = "QHHDesktopStorageBox.BoxListOrder";
+    private const int WmHotKey = 0x0312;
+    private const int QuickPanelHotKeyId = 0x5744;
+    internal const string SupportPageUri = "https://github.com/honghao919/QHHDesktopStorageBox/issues";
+
+    private readonly QuickPanelWindow _quickPanel;
+    private readonly IAppLogger _logger;
+    private readonly QuickPanelHotKeySettingsStore _hotKeySettings;
+    private QuickPanelHotKey _quickPanelHotKey;
+    private NativeHotKey? _hotKey;
+    private bool _isHotKeyRegistered;
+    private bool _isCapturingHotKey;
+    private bool _isApplyingHotKey;
+    private HwndSource? _source;
+    private Point? _boxDragStart;
+    private BoxViewModel? _boxDragSource;
+    private ListBoxItem? _boxDropTarget;
+    private bool _isBoxVisualStylePageOpen;
+    private bool _isBoxVisualStyleTransitioning;
+    private bool _isEditorOpacityRefreshQueued;
+    private readonly HashSet<int> _recordedLayoutBackupSlots = [];
+    public event EventHandler? WindowHidden;
+    public event EventHandler? WindowClosing;
+    public event EventHandler? DesktopShellRestarted;
+
+    public event EventHandler<int>? RecordLayoutBackupRequested;
+
+    public event EventHandler<int>? RestoreLayoutBackupRequested;
+
+    public event EventHandler<int>? DeleteLayoutBackupRequested;
+
+    public event EventHandler<Guid>? RecallBoxToScreenCenterRequested;
+
+    /// <summary>
+    /// Raised when the user asks to reopen a desktop box window (e.g. by
+    /// double-clicking its entry in the sidebar list). Carries the box id.
+    /// </summary>
+    public event EventHandler<Guid>? ReopenBoxRequested;
+
+    internal MainWindow(
+        MainViewModel viewModel,
+        QuickPanelWindow quickPanel,
+        IAppLogger logger,
+        QuickPanelHotKeySettingsStore hotKeySettings,
+        QuickPanelHotKey quickPanelHotKey)
+    {
+        DataContext = viewModel;
+        _quickPanel = quickPanel;
+        _logger = logger;
+        _hotKeySettings = hotKeySettings;
+        _quickPanelHotKey = quickPanelHotKey;
+        InitializeComponent();
+        UpdateHotKeyUi("点击按钮可修改");
+        Loaded += OnLoaded;
+        DpiChanged += OnDpiChanged;
+        AppThemeManager.ThemeChanged += OnThemeChanged;
+        AppThemeManager.BoxOpacityChanged += OnBoxOpacityChanged;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ViewModel.ImportPreflightRequested += OnImportPreflightRequested;
+    }
+
+    private bool _forceClosing;
+
+    public void MinimizeToTray()
+    {
+        Hide();
+        WindowHidden?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+
+    internal void SendBehindDesktop()
+    {
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        DesktopToolWindow.SendToBottomWithoutActivation(
+            new WindowInteropHelper(this).Handle);
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_forceClosing)
+        {
+            base.OnClosing(e);
+            return;
+        }
+
+        e.Cancel = true;
+        MinimizeToTray();
+    }
+
+    public void ForceClose()
+    {
+        _forceClosing = true;
+        Close();
+    }
+
+    public MainViewModel ViewModel => (MainViewModel)DataContext;
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+
+        try
+        {
+            var handle = new WindowInteropHelper(this).Handle;
+            _source = HwndSource.FromHwnd(handle);
+            _source?.AddHook(WndProc);
+
+            _hotKey = new NativeHotKey(handle, QuickPanelHotKeyId);
+            RegisterInitialHotKey();
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to register quick panel hotkey.");
+            _isHotKeyRegistered = false;
+            UpdateHotKeyUi(GetHotKeyErrorText(exception));
+        }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Loaded -= OnLoaded;
+        DpiChanged -= OnDpiChanged;
+        AppThemeManager.ThemeChanged -= OnThemeChanged;
+        AppThemeManager.BoxOpacityChanged -= OnBoxOpacityChanged;
+        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _source?.RemoveHook(WndProc);
+        _hotKey?.Dispose();
+        _quickPanel.ForceClose();
+        WindowClosing?.Invoke(this, EventArgs.Empty);
+        base.OnClosed(e);
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        UpdateIconDisplayMetrics(VisualTreeHelper.GetDpi(this));
+        ApplyThemeAppearance();
+        WindowMotion.PopIn(this, 0.985, 160);
+    }
+
+    private void OnDpiChanged(object sender, DpiChangedEventArgs e)
+    {
+        UpdateIconDisplayMetrics(e.NewDpi);
+    }
+
+    private void UpdateIconDisplayMetrics(DpiScale dpi)
+    {
+        ViewModel.UpdateIconDisplayMetrics(dpi.DpiScaleX, dpi.DpiScaleY);
+    }
+
+    private void OnThemeChanged(object? sender, AppTheme theme)
+    {
+        ApplyThemeAppearance();
+    }
+
+    private void OnBoxOpacityChanged(object? sender, ThemeBoxOpacityChangedEventArgs e)
+    {
+        if (e.Theme != AppThemeManager.CurrentTheme || !ViewModel.EditorFollowsBoxOpacity)
+        {
+            return;
+        }
+
+        QueueEditorOpacityRefresh();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.EditorFollowsBoxOpacity))
+        {
+            QueueEditorOpacityRefresh();
+        }
+    }
+
+    private void QueueEditorOpacityRefresh()
+    {
+        if (_isEditorOpacityRefreshQueued)
+        {
+            return;
+        }
+
+        _isEditorOpacityRefreshQueued = true;
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Background,
+            () =>
+            {
+                _isEditorOpacityRefreshQueued = false;
+                RefreshEditorOpacityResources();
+            });
+    }
+
+    private void ApplyThemeAppearance()
+    {
+        AppThemeManager.ApplyToWindow(this);
+        RefreshEditorOpacityResources();
+    }
+
+    private void RefreshEditorOpacityResources()
+    {
+        if (ViewModel.EditorFollowsBoxOpacity)
+        {
+            AppThemeManager.ApplyEditorOpacityResources(Resources);
+            return;
+        }
+
+        AppThemeManager.ClearEditorOpacityResources(Resources);
+    }
+
+    private void RegisterInitialHotKey()
+    {
+        if (_hotKey is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _hotKey.Register(_quickPanelHotKey.RegistrationModifiers, _quickPanelHotKey.VirtualKey);
+            _isHotKeyRegistered = true;
+            UpdateHotKeyUi("已启用，点击按钮可修改");
+        }
+        catch (Exception exception)
+        {
+            _isHotKeyRegistered = false;
+            _logger.Error(exception, "Failed to register configured quick panel hotkey.");
+            UpdateHotKeyUi(GetHotKeyErrorText(exception));
+        }
+    }
+
+    private void OnQuickPanelHotKeyButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (_isApplyingHotKey)
+        {
+            return;
+        }
+
+        _isCapturingHotKey = true;
+        QuickPanelHotKeyButton.Content = "请按新快捷键…";
+        QuickPanelHotKeyStatusText.Text = "需包含 Ctrl、Alt 或 Win；Esc 取消";
+        QuickPanelHotKeyButton.Focus();
+        Keyboard.Focus(QuickPanelHotKeyButton);
+    }
+
+    private async void OnChangeDataDirectoryClick(object sender, RoutedEventArgs e)
+    {
+        var viewModel = ViewModel;
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择新的数据存储文件夹（请使用空文件夹）"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var targetDirectory = dialog.FolderName;
+        if (string.Equals(
+                Path.GetFullPath(targetDirectory),
+                Path.GetFullPath(viewModel.CurrentDataDirectory),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(
+                this,
+                "所选文件夹就是当前数据目录，无需迁移。",
+                "数据存储位置",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            this,
+            $"将把数据从\n{viewModel.CurrentDataDirectory}\n\n迁移到\n{targetDirectory}\n\n迁移完成后需要重启应用才会使用新目录，是否继续？",
+            "迁移数据存储位置",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            await viewModel.MigrateDataDirectoryAsync(targetDirectory);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Data directory migration failed.");
+            MessageBox.Show(
+                this,
+                "数据迁移失败：\n" + exception.Message,
+                "数据存储位置",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        var restart = MessageBox.Show(
+            this,
+            "数据已迁移完成。是否立即重启 QHH Desktop Storage Box 以使用新目录？\n注意：若不立即重启，此后对盒子内容的修改在重启后不会保留。\n（原目录会保留作为备份，可稍后手动删除）",
+            "迁移完成",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (restart != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        // 交给 App 统一编排：布置"等本进程退出后再启动"的辅助进程，然后走完整关闭流程。
+        if (Application.Current is App app)
+        {
+            await app.RestartApplicationAsync();
+            return;
+        }
+
+        _forceClosing = true;
+        Application.Current.Shutdown();
+    }
+
+    private async void OnQuickPanelHotKeyPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_isCapturingHotKey)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.Escape)
+        {
+            CancelHotKeyCapture("已取消修改");
+            return;
+        }
+
+        if (IsModifierKey(key))
+        {
+            QuickPanelHotKeyStatusText.Text = "继续按下一个非修饰键";
+            return;
+        }
+
+        var modifiers = GetHotKeyModifiers(Keyboard.Modifiers);
+        if ((modifiers & (HotKeyModifiers.Control | HotKeyModifiers.Alt | HotKeyModifiers.Win)) == 0)
+        {
+            QuickPanelHotKeyStatusText.Text = "请至少按住 Ctrl、Alt 或 Win";
+            return;
+        }
+
+        var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+        var candidate = new QuickPanelHotKey(modifiers, virtualKey);
+        if (!candidate.IsValid)
+        {
+            QuickPanelHotKeyStatusText.Text = "这个按键不能用作全局快捷键";
+            return;
+        }
+
+        _isCapturingHotKey = false;
+        _isApplyingHotKey = true;
+        QuickPanelHotKeyButton.IsEnabled = false;
+        try
+        {
+            await ApplyQuickPanelHotKeyAsync(candidate);
+        }
+        finally
+        {
+            _isApplyingHotKey = false;
+            QuickPanelHotKeyButton.IsEnabled = true;
+        }
+    }
+
+    private void OnQuickPanelHotKeyLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (_isCapturingHotKey)
+        {
+            CancelHotKeyCapture("已取消修改");
+        }
+    }
+
+    private async Task ApplyQuickPanelHotKeyAsync(QuickPanelHotKey candidate)
+    {
+        if (_hotKey is null)
+        {
+            UpdateHotKeyUi("快捷键组件尚未初始化");
+            return;
+        }
+
+        if (candidate == _quickPanelHotKey && _isHotKeyRegistered)
+        {
+            UpdateHotKeyUi("快捷键未更改");
+            return;
+        }
+
+        var previous = _quickPanelHotKey;
+        var previousWasRegistered = _isHotKeyRegistered;
+        try
+        {
+            _hotKey.Register(candidate.RegistrationModifiers, candidate.VirtualKey);
+            _isHotKeyRegistered = true;
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to register the requested quick panel hotkey.");
+            RestorePreviousHotKey(previous, previousWasRegistered);
+            UpdateHotKeyUi(GetHotKeyErrorText(exception));
+            return;
+        }
+
+        try
+        {
+            await _hotKeySettings.SaveAsync(candidate);
+            _quickPanelHotKey = candidate;
+            UpdateHotKeyUi("已保存并立即生效");
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to save quick panel hotkey.");
+            RestorePreviousHotKey(previous, previousWasRegistered);
+            UpdateHotKeyUi("保存失败，已恢复原快捷键");
+        }
+    }
+
+    private void RestorePreviousHotKey(QuickPanelHotKey previous, bool previousWasRegistered)
+    {
+        if (_hotKey is null)
+        {
+            _isHotKeyRegistered = false;
+            return;
+        }
+
+        if (!previousWasRegistered)
+        {
+            _hotKey.Unregister();
+            _isHotKeyRegistered = false;
+            return;
+        }
+
+        try
+        {
+            _hotKey.Register(previous.RegistrationModifiers, previous.VirtualKey);
+            _isHotKeyRegistered = true;
+        }
+        catch (Exception restoreException)
+        {
+            _isHotKeyRegistered = false;
+            _logger.Error(restoreException, "Failed to restore previous quick panel hotkey.");
+        }
+    }
+
+    private void CancelHotKeyCapture(string statusText)
+    {
+        _isCapturingHotKey = false;
+        UpdateHotKeyUi(statusText);
+    }
+
+    private void UpdateHotKeyUi(string statusText)
+    {
+        QuickPanelHotKeyButton.Content = _quickPanelHotKey.DisplayText;
+        QuickPanelHotKeyStatusText.Text = statusText;
+    }
+
+    private static HotKeyModifiers GetHotKeyModifiers(ModifierKeys modifiers)
+    {
+        var result = HotKeyModifiers.None;
+        if (modifiers.HasFlag(ModifierKeys.Control))
+        {
+            result |= HotKeyModifiers.Control;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Alt))
+        {
+            result |= HotKeyModifiers.Alt;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            result |= HotKeyModifiers.Shift;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Windows))
+        {
+            result |= HotKeyModifiers.Win;
+        }
+
+        return result;
+    }
+
+    private static bool IsModifierKey(Key key)
+    {
+        return key is Key.LeftCtrl
+            or Key.RightCtrl
+            or Key.LeftAlt
+            or Key.RightAlt
+            or Key.LeftShift
+            or Key.RightShift
+            or Key.LWin
+            or Key.RWin;
+    }
+
+    private static string GetHotKeyErrorText(Exception exception)
+    {
+        return exception is Win32Exception { NativeErrorCode: 1409 }
+            ? "快捷键已被其他程序占用，请换一个组合"
+            : "快捷键注册失败，请换一个组合重试";
+    }
+
+    private void OnShellHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
+    }
+
+    private void OnMinimizeClicked(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void OnCloseClicked(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private nint WndProc(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (message == DesktopToolWindow.TaskbarCreatedMessage)
+        {
+            _ = Dispatcher.BeginInvoke(
+                new Action(() => DesktopShellRestarted?.Invoke(this, EventArgs.Empty)));
+        }
+
+        if (message == WmHotKey && wParam.ToInt32() == QuickPanelHotKeyId)
+        {
+            handled = true;
+            _ = Dispatcher.InvokeAsync(async () => await _quickPanel.ToggleAsync());
+        }
+
+        return nint.Zero;
+    }
+
+    private void OnPreviewDragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(BoxListDragFormat))
+        {
+            // Let the sidebar ListBox handle its own reorder drag event.
+            e.Handled = false;
+            return;
+        }
+
+        if (e.Data.GetDataPresent(InternalDrawerItemDragFormat))
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        if (!ViewModel.CanImportFiles)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnFilesDropped(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(InternalDrawerItemDragFormat))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            return;
+        }
+
+        if (!ViewModel.CanImportFiles)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            await ViewModel.ImportPathsAsync(paths);
+            var lastItem = ViewModel.Items.LastOrDefault();
+            if (lastItem is not null)
+            {
+                MainItemsList.SelectedItem = lastItem;
+                MainItemsList.Focus();
+            }
+        }
+    }
+
+    private async void OnItemsMouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source)
+        {
+            var item = ItemsControl.ContainerFromElement((ItemsControl)sender, source) as FrameworkElement;
+            if (item?.DataContext is DrawerItemViewModel drawerItem)
+            {
+                await ViewModel.OpenItemCommand.ExecuteAsync(drawerItem);
+            }
+        }
+    }
+
+    private void OnBoxesSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ListBox listBox && listBox.SelectedItem is not null)
+        {
+            listBox.ScrollIntoView(listBox.SelectedItem);
+            ShowPrimaryBoxControls();
+            ShowSelectedBoxOverview();
+        }
+    }
+
+    private void OnBoxesPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source
+            || ItemsControl.ContainerFromElement(BoxesList, source) is not ListBoxItem)
+        {
+            return;
+        }
+
+        ShowSelectedBoxOverview();
+    }
+
+    private void ShowSelectedBoxOverview()
+    {
+        if (ViewModel.ShowDashboardCommand.CanExecute(null))
+        {
+            ViewModel.ShowDashboardCommand.Execute(null);
+        }
+    }
+
+    private void OnBoxesPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _boxDragStart = e.GetPosition(BoxesList);
+        _boxDragSource = e.OriginalSource is DependencyObject source
+            ? (ItemsControl.ContainerFromElement(BoxesList, source) as ListBoxItem)?.DataContext as BoxViewModel
+            : null;
+    }
+
+    private void OnBoxesPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed
+            || _boxDragStart is null
+            || _boxDragSource is null)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(BoxesList);
+        if (Math.Abs(current.X - _boxDragStart.Value.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - _boxDragStart.Value.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var data = new DataObject(BoxListDragFormat, _boxDragSource.Id.ToString("D"));
+        try
+        {
+            e.Handled = true;
+            DragDrop.DoDragDrop(BoxesList, data, DragDropEffects.Move);
+        }
+        finally
+        {
+            _boxDragStart = null;
+            _boxDragSource = null;
+            ClearBoxDropIndicator();
+        }
+    }
+
+    private void OnBoxesDragOver(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(BoxListDragFormat)
+            || !TryGetBoxDropTarget(e, out var target, out var insertAfter))
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            ClearBoxDropIndicator();
+            return;
+        }
+
+        if (!ReferenceEquals(_boxDropTarget, target)
+            || !string.Equals(
+                target.Tag as string,
+                insertAfter ? "DropAfter" : "DropBefore",
+                StringComparison.Ordinal))
+        {
+            ClearBoxDropIndicator();
+            _boxDropTarget = target;
+            target.Tag = insertAfter ? "DropAfter" : "DropBefore";
+            BoxesList.ScrollIntoView(target.DataContext);
+        }
+
+        e.Effects = DragDropEffects.Move;
+        e.Handled = true;
+    }
+
+    private async void OnBoxesDrop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(BoxListDragFormat)
+            || e.Data.GetData(BoxListDragFormat) is not string draggedIdText
+            || !Guid.TryParse(draggedIdText, out var draggedId)
+            || !TryGetBoxDropTarget(e, out var target, out var insertAfter)
+            || target.DataContext is not BoxViewModel targetBox)
+        {
+            ClearBoxDropIndicator();
+            return;
+        }
+
+        e.Effects = DragDropEffects.Move;
+        e.Handled = true;
+        ClearBoxDropIndicator();
+        await ViewModel.ReorderBoxAsync(draggedId, targetBox.Id, insertAfter);
+    }
+
+    private bool TryGetBoxDropTarget(
+        DragEventArgs e,
+        out ListBoxItem target,
+        out bool insertAfter)
+    {
+        var position = e.GetPosition(BoxesList);
+        var hit = BoxesList.InputHitTest(position) as DependencyObject;
+        var container = hit is null
+            ? null
+            : ItemsControl.ContainerFromElement(BoxesList, hit) as ListBoxItem;
+
+        if (container is null && BoxesList.Items.Count > 0)
+        {
+            container = BoxesList.ItemContainerGenerator.ContainerFromIndex(
+                BoxesList.Items.Count - 1) as ListBoxItem;
+            insertAfter = true;
+        }
+        else
+        {
+            insertAfter = container is not null
+                && e.GetPosition(container).Y >= container.ActualHeight / 2.0;
+        }
+
+        target = container!;
+        return container is not null;
+    }
+
+    private void ClearBoxDropIndicator()
+    {
+        if (_boxDropTarget is not null)
+        {
+            _boxDropTarget.Tag = null;
+            _boxDropTarget = null;
+        }
+    }
+
+    private void OnBoxesMouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        // Double-clicking a sidebar entry reopens (shows + focuses) the
+        // corresponding desktop box window — the only way back from the
+        // window's close (X) -> Hide() behavior short of restarting the app.
+        if (e.OriginalSource is not DependencyObject source
+            || sender is not ItemsControl items)
+        {
+            return;
+        }
+
+        var container = ItemsControl.ContainerFromElement(items, source) as FrameworkElement;
+        if (container?.DataContext is BoxViewModel box)
+        {
+            ReopenBoxRequested?.Invoke(this, box.Id);
+        }
+    }
+
+    private async void OnMainItemsPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete)
+        {
+            return;
+        }
+
+        var selected = GetSelectedBatchItems();
+        if (selected.Length == 0)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (selected.Length == 1)
+        {
+            await ViewModel.DeleteItemCommand.ExecuteAsync(selected[0]);
+        }
+        else
+        {
+            await ViewModel.BatchDeleteItemsAsync(selected);
+        }
+
+        MainItemsList.Focus();
+    }
+
+    private void OnMainItemsSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var count = GetSelectedBatchItems().Length;
+        BatchSelectionCountText.Text = $"已选 {count} 项";
+        BatchActionsBar.Visibility = count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void OnImportPreflightRequested(
+        object? sender,
+        ImportPreflightRequestedEventArgs e)
+    {
+        var choice = MessageBox.Show(
+            e.Result.BuildSummary()
+            + Environment.NewLine
+            + Environment.NewLine
+            + "“是”：保留两份，自动添加后缀"
+            + Environment.NewLine
+            + "“否”：跳过同名项目"
+            + Environment.NewLine
+            + "“取消”：停止本次导入",
+            "导入预检",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Information);
+
+        e.Completion.TrySetResult(choice switch
+        {
+            MessageBoxResult.Yes => ImportConflictPolicy.AutoRename,
+            MessageBoxResult.No => ImportConflictPolicy.Skip,
+            _ => null
+        });
+    }
+
+    private async void OnBatchOpenClicked(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.BatchOpenItemsAsync(GetSelectedBatchItems());
+    }
+
+    private async void OnBatchExportClicked(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.BatchExportItemsAsync(GetSelectedBatchItems());
+    }
+
+    private async void OnBatchDeleteClicked(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelectedBatchItems();
+        if (selected.Length == 0)
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"确定处理选中的 {selected.Length} 项吗？普通盒和收件箱项目会恢复到原位置，映射盒只移除引用。",
+            "批量删除",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        await ViewModel.BatchDeleteItemsAsync(selected);
+        MainItemsList.UnselectAll();
+    }
+
+    private void OnBatchMoveClicked(object sender, RoutedEventArgs e)
+    {
+        BatchMovePopup.IsOpen = true;
+    }
+
+    private async void OnBatchMoveToBoxClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: BoxViewModel targetBox })
+        {
+            return;
+        }
+
+        BatchMovePopup.IsOpen = false;
+        await ViewModel.BatchMoveItemsAsync(GetSelectedBatchItems(), targetBox.Id);
+        MainItemsList.UnselectAll();
+    }
+
+    private DrawerItemViewModel[] GetSelectedBatchItems()
+    {
+        return MainItemsList.SelectedItems
+            .OfType<DrawerItemViewModel>()
+            .ToArray();
+    }
+
+    private void OnCreateBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = true;
+    }
+
+    private async void OnCreateNormalBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = false;
+        await ViewModel.CreateNormalBoxCommand.ExecuteAsync(null);
+    }
+
+    private async void OnCreateMappingBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = false;
+        await ViewModel.CreateMappingBoxCommand.ExecuteAsync(null);
+    }
+
+    private async void OnCreateInboxBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = false;
+        await ViewModel.CreateInboxBoxCommand.ExecuteAsync(null);
+    }
+
+    private async void OnCreateSmartBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = false;
+        await ViewModel.CreateSmartBoxCommand.ExecuteAsync(null);
+        if (ViewModel.SelectedBox?.IsSmartBox == true)
+        {
+            await OpenSmartBoxRuleEditorAsync();
+        }
+    }
+
+    private async void OnOpenSmartBoxRuleClicked(object sender, RoutedEventArgs e)
+    {
+        await OpenSmartBoxRuleEditorAsync();
+    }
+
+    private async Task OpenSmartBoxRuleEditorAsync()
+    {
+        var rule = await ViewModel.GetSelectedSmartBoxRuleAsync();
+        SmartBoxRootTextBox.Text = rule?.RootDirectory
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        SmartBoxNameTextBox.Text = rule?.NameContains ?? string.Empty;
+        SmartBoxExtensionsTextBox.Text = rule?.Extensions ?? string.Empty;
+        SmartBoxDaysTextBox.Text = (rule?.ModifiedWithinDays ?? 0).ToString(
+            System.Globalization.CultureInfo.InvariantCulture);
+        SmartBoxMaxItemsTextBox.Text = (rule?.MaxItems ?? 300).ToString(
+            System.Globalization.CultureInfo.InvariantCulture);
+        SmartBoxRulePopup.IsOpen = true;
+    }
+
+    private void OnChooseSmartBoxRootClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择智能盒监控文件夹"
+        };
+        if (Directory.Exists(SmartBoxRootTextBox.Text))
+        {
+            dialog.InitialDirectory = SmartBoxRootTextBox.Text;
+        }
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            SmartBoxRootTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private async void OnSaveSmartBoxRuleClicked(object sender, RoutedEventArgs e)
+    {
+        if (!TryBuildSmartBoxRule(out var rule))
+        {
+            return;
+        }
+
+        SmartBoxRulePopup.IsOpen = false;
+        await ViewModel.SaveSmartBoxRuleAsync(rule);
+    }
+
+    private async void OnSyncSmartBoxRuleClicked(object sender, RoutedEventArgs e)
+    {
+        if (!TryBuildSmartBoxRule(out var rule))
+        {
+            return;
+        }
+
+        await ViewModel.SaveSmartBoxRuleAsync(rule);
+        SmartBoxRulePopup.IsOpen = false;
+    }
+
+    private bool TryBuildSmartBoxRule(out SmartBoxRule rule)
+    {
+        rule = null!;
+        var root = SmartBoxRootTextBox.Text.Trim();
+        if (!Directory.Exists(root))
+        {
+            MessageBox.Show(
+                "请选择一个存在的监控文件夹。",
+                "智能盒规则",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
+        if (!int.TryParse(
+                SmartBoxDaysTextBox.Text.Trim(),
+                out var days)
+            || !int.TryParse(
+                SmartBoxMaxItemsTextBox.Text.Trim(),
+                out var maxItems))
+        {
+            MessageBox.Show(
+                "最近天数和最多项目数必须是整数。",
+                "智能盒规则",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
+        rule = new SmartBoxRule(
+            root,
+            SmartBoxNameTextBox.Text.Trim(),
+            SmartBoxExtensionsTextBox.Text.Trim(),
+            days,
+            maxItems);
+        return true;
+    }
+
+    private void OnOpenBoxVisualStylePage(object sender, RoutedEventArgs e)
+    {
+        if (_isBoxVisualStylePageOpen
+            || _isBoxVisualStyleTransitioning
+            || ViewModel.SelectedBox?.CanSelectVisualStyle != true)
+        {
+            return;
+        }
+
+        _isBoxVisualStylePageOpen = true;
+        BoxControlsPrimaryPanel.IsHitTestVisible = false;
+        BoxVisualStyleSecondaryPanel.IsHitTestVisible = true;
+        VisualStateManager.GoToElementState(
+            BoxControlsPageHost,
+            "VisualStyleSelectionState",
+            useTransitions: true);
+    }
+
+    private void OnCloseBoxVisualStylePage(object sender, RoutedEventArgs e)
+    {
+        ShowPrimaryBoxControls();
+    }
+
+    private async void OnBoxVisualStyleSelected(object sender, RoutedEventArgs e)
+    {
+        if (_isBoxVisualStyleTransitioning
+            || sender is not Button { DataContext: BoxVisualStyleOption option } button)
+        {
+            return;
+        }
+
+        _isBoxVisualStyleTransitioning = true;
+        BoxVisualStyleSecondaryPanel.IsHitTestVisible = false;
+        try
+        {
+            TryAnimateVisualStyleSelection(button);
+            await Task.Delay(170);
+            await ViewModel.SetSelectedBoxVisualStyleCommand.ExecuteAsync(option);
+            await Task.Delay(40);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to complete box visual style selection animation.");
+        }
+        finally
+        {
+            ShowPrimaryBoxControls();
+            _isBoxVisualStyleTransitioning = false;
+        }
+    }
+
+    private void OnOpenDrawerSortMenu(object sender, RoutedEventArgs e)
+    {
+        DrawerSortPopup.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void OnDrawerSortOptionClicked(object sender, RoutedEventArgs e)
+    {
+        DrawerSortPopup.IsOpen = false;
+    }
+
+    private void OnOpenBoxActionsMenu(object sender, RoutedEventArgs e)
+    {
+        BoxActionsPopup.IsOpen = !BoxActionsPopup.IsOpen;
+        e.Handled = true;
+    }
+
+    private void OnBoxActionMenuItemClicked(object sender, RoutedEventArgs e)
+    {
+        BoxActionsPopup.IsOpen = false;
+    }
+
+    private void OnShowDesktopBoxClicked(object sender, RoutedEventArgs e)
+    {
+        BoxActionsPopup.IsOpen = false;
+        if (ViewModel.SelectedBox is { } box)
+        {
+            ReopenBoxRequested?.Invoke(this, box.Id);
+        }
+    }
+
+    private void OnRecordLayoutBackupClicked(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetLayoutBackupSlot(sender, out var slot))
+        {
+            return;
+        }
+
+        if (_recordedLayoutBackupSlots.Contains(slot))
+        {
+            var result = System.Windows.MessageBox.Show(
+                this,
+                $"备份槽位 {slot} 已有记录。\n\n是否确认覆盖原有整体布局备份？",
+                "确认覆盖布局备份",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning);
+            if (result != MessageBoxResult.OK)
+            {
+                return;
+            }
+        }
+
+        RecordLayoutBackupRequested?.Invoke(this, slot);
+    }
+
+    private void OnRestoreLayoutBackupClicked(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetLayoutBackupSlot(sender, out var slot))
+        {
+            return;
+        }
+
+        if (!_recordedLayoutBackupSlots.Contains(slot))
+        {
+            return;
+        }
+
+        var result = System.Windows.MessageBox.Show(
+            this,
+            $"是否恢复备份槽位 {slot}？\n\n当前仍存在的盒子将移动到备份中记录的位置。",
+            "恢复整体布局",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Question);
+        if (result == MessageBoxResult.OK)
+        {
+            RestoreLayoutBackupRequested?.Invoke(this, slot);
+        }
+    }
+
+    private void OnDeleteLayoutBackupClicked(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetLayoutBackupSlot(sender, out var slot)
+            || !_recordedLayoutBackupSlots.Contains(slot))
+        {
+            return;
+        }
+
+        var result = System.Windows.MessageBox.Show(
+            this,
+            $"是否删除备份槽位 {slot}？\n\n删除后无法恢复该槽位中记录的整体布局。",
+            "删除布局备份",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning);
+        if (result == MessageBoxResult.OK)
+        {
+            DeleteLayoutBackupRequested?.Invoke(this, slot);
+        }
+    }
+
+    internal void SetLayoutBackupSlotState(int slot, bool hasBackup)
+    {
+        var controls = slot switch
+        {
+            1 => (LayoutBackupSlot1Status, LayoutBackupSlot1RecordButton, LayoutBackupSlot1RestoreButton, LayoutBackupSlot1DeleteButton),
+            2 => (LayoutBackupSlot2Status, LayoutBackupSlot2RecordButton, LayoutBackupSlot2RestoreButton, LayoutBackupSlot2DeleteButton),
+            3 => (LayoutBackupSlot3Status, LayoutBackupSlot3RecordButton, LayoutBackupSlot3RestoreButton, LayoutBackupSlot3DeleteButton),
+            _ => throw new ArgumentOutOfRangeException(nameof(slot), slot, "Layout backup slot must be from 1 to 3.")
+        };
+        var presentation = GetLayoutBackupSlotPresentation(hasBackup);
+
+        if (hasBackup)
+        {
+            _recordedLayoutBackupSlots.Add(slot);
+        }
+        else
+        {
+            _recordedLayoutBackupSlots.Remove(slot);
+        }
+
+        controls.Item1.Text = presentation.StatusText;
+        controls.Item1.FontWeight = hasBackup ? FontWeights.SemiBold : FontWeights.Normal;
+        controls.Item1.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            hasBackup ? "AccentBrush" : "TextMutedBrush");
+        controls.Item2.Content = presentation.RecordButtonText;
+        controls.Item3.Visibility = presentation.CanRestore ? Visibility.Visible : Visibility.Collapsed;
+        controls.Item4.Visibility = presentation.CanDelete ? Visibility.Visible : Visibility.Collapsed;
+        System.Windows.Automation.AutomationProperties.SetName(
+            controls.Item2,
+            hasBackup
+                ? $"覆盖备份槽位 {slot} 的整体布局"
+                : $"记录整体布局到备份槽位 {slot}");
+    }
+
+    internal static LayoutBackupSlotPresentation GetLayoutBackupSlotPresentation(bool hasBackup) =>
+        hasBackup
+            ? new LayoutBackupSlotPresentation("已记录", "覆盖", true, true)
+            : new LayoutBackupSlotPresentation("未记录", "记录", false, false);
+
+    private static bool TryGetLayoutBackupSlot(object sender, out int slot)
+    {
+        slot = 0;
+        return sender is FrameworkElement { Tag: string raw }
+            && int.TryParse(raw, out slot)
+            && slot is >= 1 and <= 3;
+    }
+
+    internal readonly record struct LayoutBackupSlotPresentation(
+        string StatusText,
+        string RecordButtonText,
+        bool CanRestore,
+        bool CanDelete);
+
+    private void OnThemeTransparencyInputKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || sender is not TextBox input)
+        {
+            return;
+        }
+
+        var binding = input.GetBindingExpression(TextBox.TextProperty);
+        binding?.UpdateSource();
+        binding?.UpdateTarget();
+        e.Handled = true;
+    }
+
+    private void OnThemeTransparencyInputLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox input)
+        {
+            return;
+        }
+
+        var binding = input.GetBindingExpression(TextBox.TextProperty);
+        binding?.UpdateSource();
+        binding?.UpdateTarget();
+    }
+
+    private void OnRecallBoxClicked(object sender, RoutedEventArgs e)
+    {
+        BoxActionsPopup.IsOpen = false;
+        RecallBoxConfirmPopup.IsOpen = ViewModel.SelectedBox is not null;
+    }
+
+    private void OnCancelRecallBoxClicked(object sender, RoutedEventArgs e)
+    {
+        RecallBoxConfirmPopup.IsOpen = false;
+    }
+
+    private void OnConfirmRecallBoxClicked(object sender, RoutedEventArgs e)
+    {
+        RecallBoxConfirmPopup.IsOpen = false;
+        if (ViewModel.SelectedBox is { } box)
+        {
+            RecallBoxToScreenCenterRequested?.Invoke(this, box.Id);
+        }
+    }
+
+    private void OnMainWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!BoxActionsPopup.IsOpen || e.OriginalSource is not DependencyObject source)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(source, BtnMoreBoxActions) || BtnMoreBoxActions.IsAncestorOf(source))
+        {
+            return;
+        }
+
+        BoxActionsPopup.IsOpen = false;
+    }
+
+    private void OnMainWindowDeactivated(object? sender, EventArgs e)
+    {
+        BoxActionsPopup.IsOpen = false;
+    }
+
+    private async void OnCreateDrawerBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = false;
+        await ViewModel.CreateDrawerBoxCommand.ExecuteAsync(null);
+    }
+
+    private void TryAnimateVisualStyleSelection(Button button)
+    {
+        try
+        {
+            var currentTransform = button.RenderTransform as ScaleTransform;
+            var scaleTransform = EnsureAnimatableScaleTransform(currentTransform);
+            if (!ReferenceEquals(scaleTransform, currentTransform))
+            {
+                button.RenderTransform = scaleTransform;
+            }
+
+            AnimateVisualStyleSelection(scaleTransform);
+        }
+        catch (Exception exception)
+        {
+            // The style change is functional behavior; its decorative pulse must
+            // never prevent the command from running.
+            _logger.Error(exception, "Failed to animate box visual style selection; continuing without animation.");
+        }
+    }
+
+    internal static ScaleTransform EnsureAnimatableScaleTransform(ScaleTransform? scaleTransform)
+    {
+        if (scaleTransform is null)
+        {
+            return new ScaleTransform(1, 1);
+        }
+
+        return scaleTransform.IsFrozen
+            ? scaleTransform.CloneCurrentValue()
+            : scaleTransform;
+    }
+
+    private void ShowPrimaryBoxControls()
+    {
+        if (!_isBoxVisualStylePageOpen && !_isBoxVisualStyleTransitioning)
+        {
+            return;
+        }
+
+        _isBoxVisualStylePageOpen = false;
+        BoxVisualStyleSecondaryPanel.IsHitTestVisible = false;
+        BoxControlsPrimaryPanel.IsHitTestVisible = true;
+        VisualStateManager.GoToElementState(
+            BoxControlsPageHost,
+            "PrimaryControlsState",
+            useTransitions: true);
+    }
+
+    private static void AnimateVisualStyleSelection(ScaleTransform scaleTransform)
+    {
+        var easing = new BackEase
+        {
+            Amplitude = 0.3,
+            EasingMode = EasingMode.EaseOut
+        };
+        var pulse = new DoubleAnimation(
+            fromValue: 1,
+            toValue: 1.07,
+            duration: TimeSpan.FromMilliseconds(85))
+        {
+            AutoReverse = true,
+            EasingFunction = easing
+        };
+
+        scaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
+        scaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, pulse.Clone());
+    }
+
+    private async void OnCreateTodoBoxClicked(object sender, RoutedEventArgs e)
+    {
+        CreateBoxPopup.IsOpen = false;
+        await ViewModel.CreateTodoBoxCommand.ExecuteAsync(null);
+    }
+
+    private void OnDeleteBoxClicked(object sender, RoutedEventArgs e)
+    {
+        BoxActionsPopup.IsOpen = false;
+        DeleteConfirmPopup.IsOpen = true;
+    }
+
+    private void OnCancelDeleteBoxClicked(object sender, RoutedEventArgs e)
+    {
+        DeleteConfirmPopup.IsOpen = false;
+    }
+
+    private void OnConfirmDeleteBoxClicked(object sender, RoutedEventArgs e)
+    {
+        DeleteConfirmPopup.IsOpen = false;
+        if (ViewModel.DeleteSelectedBoxCommand.CanExecute(null))
+        {
+            ViewModel.DeleteSelectedBoxCommand.Execute(null);
+        }
+    }
+
+    private void OnRenameBoxClicked(object sender, RoutedEventArgs e)
+    {
+        RenameBoxPopup.IsOpen = true;
+        TxtRenameBox.Text = ViewModel.SelectedBox?.Name ?? "";
+        
+        Dispatcher.InvokeAsync(() =>
+        {
+            TxtRenameBox.Focus();
+            System.Windows.Input.Keyboard.Focus(TxtRenameBox);
+            TxtRenameBox.SelectAll();
+        }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void OnRenameBoxPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space && sender is System.Windows.Controls.TextBox tb)
+        {
+            var caret = tb.CaretIndex;
+            tb.Text = tb.Text.Insert(caret, " ");
+            tb.CaretIndex = caret + 1;
+            e.Handled = true;
+        }
+    }
+
+    private void OnConfirmRenameBoxClicked(object sender, RoutedEventArgs e)
+    {
+        var newName = TxtRenameBox.Text ?? "";
+
+        RenameBoxPopup.IsOpen = false;
+        if (ViewModel.RenameSelectedBoxCommand.CanExecute(newName))
+        {
+            ViewModel.RenameSelectedBoxCommand.Execute(newName);
+        }
+    }
+
+    private void OnRenameBoxKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            OnConfirmRenameBoxClicked(sender, e);
+        }
+        else if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            RenameBoxPopup.IsOpen = false;
+        }
+    }
+
+    private void OnOpenProjectLinkClicked(object sender, RoutedEventArgs e)
+    {
+        OpenExternalUri("https://github.com/honghao919/QHHDesktopStorageBox");
+    }
+
+    private void OnOpenEmailClicked(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        OpenExternalUri("mailto:honghao919@users.noreply.github.com");
+    }
+
+    private void OnOpenWebsiteClicked(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        OpenExternalUri("https://github.com/honghao919");
+    }
+
+    private void OnOpenSupportLinkClicked(object sender, RoutedEventArgs e)
+    {
+        OpenExternalUri(SupportPageUri);
+    }
+
+    private void OpenExternalUri(string uri)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = uri,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, $"Failed to open external URI: {uri}");
+        }
+    }
+}

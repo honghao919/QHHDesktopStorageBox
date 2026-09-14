@@ -1,0 +1,471 @@
+using System.Windows;
+using System.Windows.Media;
+
+namespace QHHDesktopStorageBox.App.Infrastructure;
+
+public sealed class ThemeBoxOpacityChangedEventArgs(AppTheme theme, double opacity) : EventArgs
+{
+    public AppTheme Theme { get; } = theme;
+
+    public double Opacity { get; } = opacity;
+}
+
+public static class AppThemeManager
+{
+    public const double DefaultBoxOpacity = 0.40;
+    public const double MinimumBoxOpacity = 0.10;
+    public const double MaximumBoxOpacity = 1.00;
+    private const double LegacyGlassBoxOpacity = 0.82;
+    private const double LegacyCrystalBoxOpacity = 0.94;
+
+    private static AppTheme _currentTheme = AppTheme.Moe;
+
+    private static readonly Dictionary<AppTheme, double> BoxOpacities =
+        Enum.GetValues<AppTheme>().ToDictionary(theme => theme, GetDefaultBoxOpacity);
+
+    private static readonly IReadOnlyDictionary<AppTheme, IReadOnlyDictionary<string, string>> ThemeColors =
+        new Dictionary<AppTheme, IReadOnlyDictionary<string, string>>
+        {
+            [AppTheme.Moe] = new Dictionary<string, string>
+            {
+                ["ControlCenterSurfaceBrush"] = "#FFF9FAFC",
+                ["AppBackgroundBrush"] = "#EEF1F5",
+                ["PanelBrush"] = "#FFFBFC",
+                ["PanelAltBrush"] = "#E9EDF2",
+                ["BorderBrushSoft"] = "#D3DBE4",
+                ["TextPrimaryBrush"] = "#17202A",
+                ["TextMutedBrush"] = "#5C6875",
+                ["AccentBrush"] = "#1677FF",
+                ["AccentHoverBrush"] = "#2F86FF",
+                ["AccentPressedBrush"] = "#0B63D8",
+                ["AccentSoftBrush"] = "#DCEBFF",
+                ["GlassSurfaceBrush"] = "#FFFBFC",
+                ["DrawerSecondarySurfaceBrush"] = "#F4FFFFFF",
+                ["GlassInnerBrush"] = "#EEF2F6",
+                ["GlassStrokeBrush"] = "#D5DDE6",
+                ["PositiveBrush"] = "#34C759",
+                ["PositiveSoftBrush"] = "#EAF8EE",
+                ["DangerBrush"] = "#FF3B30",
+                ["DangerSoftBrush"] = "#FFF0EF",
+                ["HoverBrush"] = "#E6ECF3",
+                ["CardShadowBrush"] = "#18000000",
+                ["DropZoneBrush"] = "#F2F5F8",
+                ["WindowOverlayBrush"] = "#00FFFFFF"
+            },
+            [AppTheme.Glass] = new Dictionary<string, string>
+            {
+                ["ControlCenterSurfaceBrush"] = "#F51A1D21",
+                ["AppBackgroundBrush"] = "#EE111317",
+                ["PanelBrush"] = "#E024272C",
+                ["PanelAltBrush"] = "#CF1B1E22",
+                ["BorderBrushSoft"] = "#35FFFFFF",
+                ["TextPrimaryBrush"] = "#F4F7FA",
+                ["TextMutedBrush"] = "#AAB4BE",
+                ["AccentBrush"] = "#4C9AFF",
+                ["AccentHoverBrush"] = "#6AAAFF",
+                ["AccentPressedBrush"] = "#2F7FEA",
+                ["AccentSoftBrush"] = "#384C9AFF",
+                ["GlassSurfaceBrush"] = "#DE24272C",
+                ["DrawerSecondarySurfaceBrush"] = "#9E15181C",
+                ["GlassInnerBrush"] = "#24FFFFFF",
+                ["GlassStrokeBrush"] = "#38FFFFFF",
+                ["PositiveBrush"] = "#30D158",
+                ["PositiveSoftBrush"] = "#2630D158",
+                ["DangerBrush"] = "#FF453A",
+                ["DangerSoftBrush"] = "#26FF453A",
+                ["HoverBrush"] = "#343B424A",
+                ["CardShadowBrush"] = "#66000000",
+                ["DropZoneBrush"] = "#292F353C",
+                ["WindowOverlayBrush"] = "#66000000"
+            },
+            [AppTheme.Crystal] = new Dictionary<string, string>
+            {
+                ["ControlCenterSurfaceBrush"] = "#F7F9FBFD",
+                ["AppBackgroundBrush"] = "#EDF1F5F9",
+                ["PanelBrush"] = "#F4FFFFFF",
+                ["PanelAltBrush"] = "#E7ECF2F7",
+                ["BorderBrushSoft"] = "#8FD2DAE3",
+                ["TextPrimaryBrush"] = "#17202A",
+                ["TextMutedBrush"] = "#5C6875",
+                ["AccentBrush"] = "#1677FF",
+                ["AccentHoverBrush"] = "#2F86FF",
+                ["AccentPressedBrush"] = "#0B63D8",
+                ["AccentSoftBrush"] = "#321677FF",
+                ["GlassSurfaceBrush"] = "#ECFFFFFF",
+                ["DrawerSecondarySurfaceBrush"] = "#C8F2F5F8",
+                ["GlassInnerBrush"] = "#B8FFFFFF",
+                ["GlassStrokeBrush"] = "#A8FFFFFF",
+                ["PositiveBrush"] = "#34C759",
+                ["PositiveSoftBrush"] = "#2634C759",
+                ["DangerBrush"] = "#FF3B30",
+                ["DangerSoftBrush"] = "#26FF3B30",
+                ["HoverBrush"] = "#B8FFFFFF",
+                ["CardShadowBrush"] = "#18000000",
+                ["DropZoneBrush"] = "#B8FFFFFF",
+                ["WindowOverlayBrush"] = "#38FFFFFF"
+            }
+        };
+
+    // 旧版“全透水晶 · 透明盒”的实际颜色，作为 40% 不透明度的外壳基准。
+    private static readonly IReadOnlyDictionary<string, string> LegacyTransparentCrystalBoxColors =
+        new Dictionary<string, string>
+        {
+            ["ControlCenterSurfaceBrush"] = "#7BF7F7FA",
+            ["AppBackgroundBrush"] = "#78FFFFFF",
+            ["PanelBrush"] = "#66FFFFFF",
+            ["PanelAltBrush"] = "#4DF2F2F7",
+            ["BorderBrushSoft"] = "#59FFFFFF",
+            ["TextPrimaryBrush"] = "#1D1D1F",
+            ["TextMutedBrush"] = "#6E6E73",
+            ["AccentBrush"] = "#0071E3",
+            ["AccentSoftBrush"] = "#2E0071E3",
+            ["GlassSurfaceBrush"] = "#66FFFFFF",
+            ["DrawerSecondarySurfaceBrush"] = "#70F5F5F7",
+            ["GlassInnerBrush"] = "#3DFFFFFF",
+            ["GlassStrokeBrush"] = "#66FFFFFF",
+            ["PositiveBrush"] = "#34C759",
+            ["PositiveSoftBrush"] = "#2634C759",
+            ["DangerBrush"] = "#FF3B30",
+            ["DangerSoftBrush"] = "#26FF3B30",
+            ["HoverBrush"] = "#52FFFFFF",
+            ["CardShadowBrush"] = "#18000000",
+            ["DropZoneBrush"] = "#33FFFFFF",
+            ["WindowOverlayBrush"] = "#24FFFFFF"
+        };
+
+    private static readonly HashSet<string> OpacityAdjustedResourceKeys =
+    [
+        "ControlCenterSurfaceBrush",
+        "AppBackgroundBrush",
+        "PanelBrush",
+        "PanelAltBrush",
+        "BorderBrushSoft",
+        "GlassSurfaceBrush",
+        "DrawerSecondarySurfaceBrush",
+        "HoverBrush",
+        "DropZoneBrush",
+        "WindowOverlayBrush"
+    ];
+
+    public static event EventHandler<AppTheme>? ThemeChanged;
+
+    // Missing overrides retain main's original appearance, including custom box opacity.
+    private static readonly Dictionary<AppTheme, double?> BoxBorderOpacities =
+        Enum.GetValues<AppTheme>().ToDictionary(theme => theme, _ => (double?)null);
+    private static readonly Dictionary<AppTheme, double?> IconFrameOpacities =
+        Enum.GetValues<AppTheme>().ToDictionary(theme => theme, _ => (double?)null);
+
+    public static event EventHandler<AppTheme>? DesktopBoxAppearanceChanged;
+
+    public static event EventHandler<ThemeBoxOpacityChangedEventArgs>? BoxOpacityChanged;
+
+    public static AppTheme CurrentTheme => _currentTheme;
+
+    public static void Apply(AppTheme theme)
+    {
+        _currentTheme = theme;
+
+        foreach (var (key, color) in ThemeColors[theme])
+        {
+            SetColor(key, color);
+        }
+
+        ThemeChanged?.Invoke(null, theme);
+    }
+
+    public static double GetBoxOpacity(AppTheme theme)
+    {
+        return BoxOpacities[theme];
+    }
+
+    public static void SetBoxOpacity(AppTheme theme, double opacity)
+    {
+        var normalized = NormalizeOpacity(opacity);
+        if (Math.Abs(BoxOpacities[theme] - normalized) < 0.0001)
+        {
+            return;
+        }
+
+        BoxOpacities[theme] = normalized;
+        BoxOpacityChanged?.Invoke(null, new ThemeBoxOpacityChangedEventArgs(theme, normalized));
+    }
+
+    public static void ApplyDesktopBoxResources(ResourceDictionary resources)
+    {
+        ApplyBoxSurfaceResources(resources);
+        SetResourceColor(resources, "DesktopBoxBorderBrush", GetDesktopBoxBorderColor(_currentTheme));
+        SetResourceColor(resources, "DesktopIconFrameBrush", GetDesktopIconFrameColor(_currentTheme));
+        SetResourceColor(resources, "DesktopIconFrameBorderBrush", GetDesktopIconFrameBorderColor(_currentTheme));
+    }
+
+    private static void ApplyBoxSurfaceResources(ResourceDictionary resources)
+    {
+        ClearDesktopBoxResources(resources);
+
+        var opacity = GetBoxOpacity(_currentTheme);
+        foreach (var key in LegacyTransparentCrystalBoxColors.Keys)
+        {
+            var color = GetDesktopBoxColor(_currentTheme, key, opacity);
+            if (color == ParseColor(ThemeColors[_currentTheme][key]))
+            {
+                continue;
+            }
+
+            var brush = new SolidColorBrush(color);
+            brush.Freeze();
+            resources[key] = brush;
+        }
+    }
+
+    public static void ApplyToWindow(Window window)
+    {
+        if (!window.AllowsTransparency)
+        {
+            WindowBackdropManager.Apply(window, _currentTheme);
+        }
+
+        window.Background = window.AllowsTransparency
+            ? Brushes.Transparent
+            : (Brush)Application.Current.Resources["AppBackgroundBrush"];
+    }
+
+    internal static Color GetDesktopBoxColor(AppTheme theme, string key, double opacity)
+    {
+        var baseColor = ParseColor(ThemeColors[theme][key]);
+        var normalized = NormalizeOpacity(opacity);
+
+        if (!OpacityAdjustedResourceKeys.Contains(key))
+        {
+            if (theme != AppTheme.Crystal)
+            {
+                return baseColor;
+            }
+
+            var legacyColor = ParseColor(LegacyTransparentCrystalBoxColors[key]);
+            if (normalized <= DefaultBoxOpacity)
+            {
+                return legacyColor;
+            }
+
+            var crystalLegacyOpacity = GetLegacyBoxOpacity(theme);
+            return normalized >= crystalLegacyOpacity
+                ? baseColor
+                : Interpolate(
+                    legacyColor,
+                    baseColor,
+                    ScaleBetween(normalized, DefaultBoxOpacity, crystalLegacyOpacity));
+        }
+
+        var transparentColor = theme == AppTheme.Crystal
+            ? ParseColor(LegacyTransparentCrystalBoxColors[key])
+            : CreateEquivalentTransparentColor(key, baseColor);
+
+        if (normalized <= DefaultBoxOpacity)
+        {
+            var alphaScale = normalized / DefaultBoxOpacity;
+            return Color.FromArgb(
+                ToByte(transparentColor.A * alphaScale),
+                transparentColor.R,
+                transparentColor.G,
+                transparentColor.B);
+        }
+
+        var legacyOpacity = GetLegacyBoxOpacity(theme);
+        if (normalized <= legacyOpacity)
+        {
+            return Interpolate(
+                transparentColor,
+                baseColor,
+                ScaleBetween(normalized, DefaultBoxOpacity, legacyOpacity));
+        }
+
+        var opaqueColor = Color.FromArgb(byte.MaxValue, baseColor.R, baseColor.G, baseColor.B);
+        return Interpolate(
+            baseColor,
+            opaqueColor,
+            ScaleBetween(normalized, legacyOpacity, MaximumBoxOpacity));
+    }
+
+    internal static double GetLegacyBoxOpacity(AppTheme theme)
+    {
+        return theme switch
+        {
+            AppTheme.Glass => LegacyGlassBoxOpacity,
+            AppTheme.Crystal => LegacyCrystalBoxOpacity,
+            _ => MaximumBoxOpacity
+        };
+    }
+
+    internal static double GetDefaultBoxOpacity(AppTheme theme)
+    {
+        return theme == AppTheme.Crystal
+            ? DefaultBoxOpacity
+            : GetLegacyBoxOpacity(theme);
+    }
+
+    internal static void ResetBoxOpacitiesForTests(double? opacity = null)
+    {
+        foreach (var theme in Enum.GetValues<AppTheme>())
+        {
+            BoxBorderOpacities[theme] = null;
+            IconFrameOpacities[theme] = null;
+            BoxOpacities[theme] = opacity is null
+                ? GetDefaultBoxOpacity(theme)
+                : NormalizeOpacity(opacity.Value);
+        }
+    }
+
+    public static void ApplyEditorOpacityResources(ResourceDictionary resources)
+    {
+        ApplyBoxSurfaceResources(resources);
+    }
+
+    internal static void ClearEditorOpacityResources(ResourceDictionary resources)
+    {
+        ClearDesktopBoxResources(resources);
+    }
+
+    private static void ClearDesktopBoxResources(ResourceDictionary resources)
+    {
+        resources.Remove("DesktopBoxBorderBrush");
+        resources.Remove("DesktopIconFrameBrush");
+        resources.Remove("DesktopIconFrameBorderBrush");
+        foreach (var key in LegacyTransparentCrystalBoxColors.Keys)
+        {
+            resources.Remove(key);
+        }
+    }
+
+    public static double GetBoxBorderOpacity(AppTheme theme) =>
+        BoxBorderOpacities[theme] ?? GetOriginalColor(theme, "GlassStrokeBrush").A / 255d;
+
+    public static double GetIconFrameOpacity(AppTheme theme) =>
+        IconFrameOpacities[theme] ?? GetOriginalColor(theme, "GlassInnerBrush").A / 255d;
+
+    public static void SetBoxBorderOpacity(AppTheme theme, double? opacity) =>
+        SetAppearanceOpacity(BoxBorderOpacities, theme, opacity);
+
+    public static void SetIconFrameOpacity(AppTheme theme, double? opacity) =>
+        SetAppearanceOpacity(IconFrameOpacities, theme, opacity);
+
+    internal static Color GetDesktopBoxBorderColor(AppTheme theme) =>
+        AdjustAppearanceAlpha(GetOriginalColor(theme, "GlassStrokeBrush"),
+            GetOriginalColor(theme, "GlassStrokeBrush").A, BoxBorderOpacities[theme]);
+
+    internal static Color GetDesktopIconFrameColor(AppTheme theme) =>
+        AdjustAppearanceAlpha(GetOriginalColor(theme, "GlassInnerBrush"),
+            GetOriginalColor(theme, "GlassInnerBrush").A, IconFrameOpacities[theme]);
+
+    internal static Color GetDesktopIconFrameBorderColor(AppTheme theme) =>
+        AdjustAppearanceAlpha(GetOriginalColor(theme, "GlassStrokeBrush"),
+            GetOriginalColor(theme, "GlassInnerBrush").A, IconFrameOpacities[theme]);
+
+    private static Color GetOriginalColor(AppTheme theme, string key) =>
+        GetDesktopBoxColor(theme, key, GetBoxOpacity(theme));
+
+    private static void SetAppearanceOpacity(Dictionary<AppTheme, double?> values, AppTheme theme, double? opacity)
+    {
+        if (opacity is { } value && !double.IsFinite(value))
+        {
+            return;
+        }
+
+        var normalized = opacity is null ? (double?)null : Math.Clamp(opacity.Value, 0, 1);
+        if (values[theme] == normalized)
+        {
+            return;
+        }
+
+        values[theme] = normalized;
+        DesktopBoxAppearanceChanged?.Invoke(null, theme);
+    }
+
+    private static Color AdjustAppearanceAlpha(Color original, byte referenceAlpha, double? opacity)
+    {
+        // Percent labels are rounded for display. Returning to that label must restore
+        // the exact original alpha, not quantize e.g. Crystal's #3D into #3E.
+        var baseline = referenceAlpha / 255d;
+        if (opacity is null || Math.Abs(opacity.Value - (1 - Math.Round((1 - baseline) * 100) / 100)) < 0.0001)
+        {
+            return original;
+        }
+
+        var requested = opacity.Value;
+        // Keep the icon's original fill/stroke relationship at the baseline, while
+        // allowing both to disappear at 100% transparency and become opaque at 0%.
+        var alpha = original.A == referenceAlpha
+            ? 255 * requested
+            : requested < baseline
+            ? original.A * requested / baseline
+            : original.A + (255 - original.A) * (requested - baseline) / (1 - baseline);
+        return Color.FromArgb(ToByte(alpha), original.R, original.G, original.B);
+    }
+
+    private static void SetResourceColor(ResourceDictionary resources, string key, Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        resources[key] = brush;
+    }
+
+    private static Color CreateEquivalentTransparentColor(string key, Color baseColor)
+    {
+        var crystalBaseColor = ParseColor(ThemeColors[AppTheme.Crystal][key]);
+        var crystalTransparentColor = ParseColor(LegacyTransparentCrystalBoxColors[key]);
+        var alphaRatio = crystalBaseColor.A == 0
+            ? 0
+            : (double)crystalTransparentColor.A / crystalBaseColor.A;
+
+        return Color.FromArgb(
+            ToByte(baseColor.A * alphaRatio),
+            baseColor.R,
+            baseColor.G,
+            baseColor.B);
+    }
+
+    private static double ScaleBetween(double value, double lowerBound, double upperBound)
+    {
+        if (Math.Abs(upperBound - lowerBound) < 0.0001)
+        {
+            return 1;
+        }
+
+        return (value - lowerBound) / (upperBound - lowerBound);
+    }
+
+    private static Color Interpolate(Color from, Color to, double progress)
+    {
+        return Color.FromArgb(
+            ToByte(from.A + ((to.A - from.A) * progress)),
+            ToByte(from.R + ((to.R - from.R) * progress)),
+            ToByte(from.G + ((to.G - from.G) * progress)),
+            ToByte(from.B + ((to.B - from.B) * progress)));
+    }
+
+    private static byte ToByte(double value)
+    {
+        return (byte)Math.Clamp((int)Math.Round(value), byte.MinValue, byte.MaxValue);
+    }
+
+    private static double NormalizeOpacity(double opacity)
+    {
+        if (double.IsNaN(opacity) || double.IsInfinity(opacity))
+        {
+            return DefaultBoxOpacity;
+        }
+
+        return Math.Clamp(opacity, MinimumBoxOpacity, MaximumBoxOpacity);
+    }
+
+    private static Color ParseColor(string color)
+    {
+        return (Color)ColorConverter.ConvertFromString(color);
+    }
+
+    private static void SetColor(string key, string color)
+    {
+        var brush = new SolidColorBrush(ParseColor(color));
+        brush.Freeze();
+        Application.Current.Resources[key] = brush;
+    }
+}

@@ -1,0 +1,377 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Messaging;
+using QHHDesktopStorageBox.App.Infrastructure;
+using QHHDesktopStorageBox.App.Messages;
+using QHHDesktopStorageBox.Core.Logging;
+using QHHDesktopStorageBox.Core.Models;
+using QHHDesktopStorageBox.Core.Services;
+
+namespace QHHDesktopStorageBox.App.ViewModels;
+
+public sealed partial class BoxViewModel : ObservableObject
+{
+    private readonly DrawerService _drawerService;
+    private readonly IAppLogger _logger;
+    private BoxVisualStyle _visualStyle;
+    private bool _isPositionLocked;
+    private bool _isTitleVisible = true;
+    private bool _isFileNameVisible;
+    private DrawerItemSortMode _drawerItemSortMode = DrawerItemSortMode.Free;
+    private int _presentationSettingsLoaded;
+
+    public BoxViewModel(
+        Box model,
+        DrawerService drawerService,
+        BoxVisualStyle visualStyle,
+        bool isPositionLocked,
+        IAppLogger? logger = null)
+    {
+        Model = model;
+        _drawerService = drawerService;
+        _logger = logger ?? NullAppLogger.Instance;
+        _visualStyle = visualStyle;
+        _isPositionLocked = isPositionLocked;
+
+        LayoutSettings = new DesktopBoxLayoutSettings(model.Type == BoxType.Drawer);
+        LayoutSettings.SetPresetChangedCallback(async (preset) => 
+        {
+            await _drawerService.SetSettingAsync(GetLayoutPresetSettingKey(Id), preset);
+            WeakReferenceMessenger.Default.Send(new BoxLayoutPresetChangedMessage(Id, preset));
+        });
+
+        WeakReferenceMessenger.Default.Register<BoxViewModel, BoxLayoutPresetChangedMessage>(
+            this,
+            static (recipient, message) =>
+            {
+                if (recipient.Id == message.BoxId)
+                {
+                    recipient.LayoutSettings.ApplyPresetWithoutCallback(message.Preset);
+                }
+            });
+
+    }
+
+    internal async Task EnsurePresentationSettingsLoadedAsync()
+    {
+        if (Interlocked.Exchange(ref _presentationSettingsLoaded, 1) != 0)
+        {
+            return;
+        }
+
+        await Task.WhenAll(
+            LoadPresetAsync(),
+            LoadTitleVisibilityAsync(),
+            LoadFileNameVisibilityAsync(),
+            LoadDrawerSortModeAsync());
+    }
+
+    private async Task LoadPresetAsync()
+    {
+        var preset = await _drawerService.GetSettingAsync(GetLayoutPresetSettingKey(Id));
+        LayoutSettings.ApplyPresetWithoutCallback(preset);
+    }
+
+    internal static string GetLayoutPresetSettingKey(Guid boxId) => $"BoxPreset_{boxId}";
+
+    internal static string GetSizeModeSettingKey(Guid boxId) => $"BoxSizeMode:{boxId:N}";
+
+    internal static string GetTitleVisibilitySettingKey(Guid boxId) =>
+        $"BoxTitleVisible:{boxId:N}";
+
+    internal static string GetLegacyDrawerTitleVisibilitySettingKey(Guid boxId) =>
+        $"DrawerTitleVisible:{boxId:N}";
+
+    internal static string GetFileNameVisibilitySettingKey(Guid boxId) =>
+        $"BoxFileNameVisible:{boxId:N}";
+
+    internal static string GetDrawerSortModeSettingKey(Guid boxId) =>
+        $"DrawerSortMode:{boxId:N}";
+
+    /// <summary>
+    /// 统一排序设置的 key（所有收纳盒型共用）。读取时抽屉盒会回退迁移
+    /// <see cref="GetDrawerSortModeSettingKey"/> 的旧值。
+    /// </summary>
+    internal static string GetBoxSortModeSettingKey(Guid boxId) =>
+        $"BoxSortMode:{boxId:N}";
+
+    public DesktopBoxLayoutSettings LayoutSettings { get; }
+    
+    public Box Model { get; }
+
+    public Guid Id => Model.Id;
+
+    public string Name => Model.Name;
+
+    public BoxType Type => Model.Type;
+
+    public bool IsTodoBox => Type == BoxType.Todo;
+
+    public bool IsDrawerBox => Type == BoxType.Drawer;
+
+    public bool IsInboxBox => Type == BoxType.Inbox;
+
+    public bool IsSmartBox => Type == BoxType.Smart;
+
+    /// <summary>
+    /// 固定 m×n 格尺寸仅适用于普通网格收纳盒；其余盒型始终自适应。
+    /// </summary>
+    public bool SupportsFixedSize => Type is BoxType.Normal or BoxType.Pixel or BoxType.Inbox;
+
+    /// <summary>
+    /// 排序（自由/名称/大小/类型/修改日期）适用于所有收纳类盒型；待办盒有自己的排序语义。
+    /// </summary>
+    public bool SupportsSorting =>
+        Type is BoxType.Normal or BoxType.Pixel or BoxType.Mapping or BoxType.Drawer or BoxType.Inbox;
+
+    public bool IsTitleVisible => _isTitleVisible;
+
+    public string TitleVisibilityToolTip => IsTitleVisible ? "隐藏桌面收纳盒名称" : "显示桌面收纳盒名称";
+
+    public string TitleVisibilityAutomationName => IsTitleVisible ? "隐藏名称" : "显示名称";
+
+    public bool SupportsFileNameVisibility =>
+        Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer or BoxType.Inbox;
+
+    public bool IsFileNameVisible => _isFileNameVisible;
+
+    public string FileNameVisibilityAutomationName =>
+        IsFileNameVisible ? "隐藏文件名" : "显示文件名";
+
+    public DrawerItemSortMode DrawerItemSortMode => _drawerItemSortMode;
+
+    public bool IsFreeSort => DrawerItemSortMode == DrawerItemSortMode.Free;
+
+    public string DrawerSortModeLabel => DrawerItemSortMode switch
+    {
+        DrawerItemSortMode.Free => "自由",
+        DrawerItemSortMode.Size => "大小",
+        DrawerItemSortMode.ItemType => "项目类型",
+        DrawerItemSortMode.ModifiedDate => "修改日期",
+        _ => "名称"
+    };
+
+    public bool IsDrawerSortByName => DrawerItemSortMode == DrawerItemSortMode.Name;
+
+    public bool IsDrawerSortBySize => DrawerItemSortMode == DrawerItemSortMode.Size;
+
+    public bool IsDrawerSortByItemType => DrawerItemSortMode == DrawerItemSortMode.ItemType;
+
+    public bool IsDrawerSortByModifiedDate => DrawerItemSortMode == DrawerItemSortMode.ModifiedDate;
+
+    public BoxVisualStyle VisualStyle => _visualStyle;
+
+    public bool IsPixelStyle => VisualStyle == BoxVisualStyle.Pixel;
+
+    public bool CanSelectVisualStyle => Type is BoxType.Normal or BoxType.Pixel or BoxType.Inbox;
+
+    public bool IsPositionLocked => _isPositionLocked;
+
+    public string PositionLockButtonToolTip =>
+        IsPositionLocked ? "解锁桌面位置" : "锁定桌面位置";
+
+    public string PositionLockButtonAutomationName =>
+        IsPositionLocked ? "解锁当前收纳盒桌面位置" : "锁定当前收纳盒桌面位置";
+
+    public string VisualStyleLabel => BoxVisualStyleCatalog.GetOption(VisualStyle).Name;
+
+    public string TypeLabel => Model.Type switch
+    {
+        BoxType.Normal or BoxType.Pixel => "普通",
+        BoxType.Mapping => "映射",
+        BoxType.Todo => "待办",
+        BoxType.Drawer => "抽屉",
+        BoxType.Inbox => "收件箱",
+        BoxType.Smart => "智能",
+        _ => "未知"
+    };
+
+    public string Description => Model.Type switch
+    {
+        BoxType.Normal or BoxType.Pixel => "拖入后移动到收纳盒",
+        BoxType.Mapping => "只保存路径引用",
+        BoxType.Todo => "独立桌面待办清单",
+        BoxType.Drawer => "安卓式展开抽屉",
+        BoxType.Inbox => "先收进来，之后再分类",
+        BoxType.Smart => "按规则自动收集映射引用",
+        _ => string.Empty
+    };
+
+    public string Badge => Model.Type switch
+    {
+        BoxType.Normal or BoxType.Pixel => "N",
+        BoxType.Mapping => "M",
+        BoxType.Todo => "T",
+        BoxType.Drawer => "D",
+        BoxType.Inbox => "I",
+        BoxType.Smart => "S",
+        _ => "?"
+    };
+
+    public string StorageLabel => Model.Type switch
+    {
+        BoxType.Normal or BoxType.Pixel or BoxType.Drawer or BoxType.Inbox => Model.StoragePath ?? string.Empty,
+        BoxType.Todo => "待办事项保存在本地数据库",
+        BoxType.Smart => "源文件保留在原位置，由规则自动维护引用",
+        _ => "源文件保留在原位置"
+    };
+
+    public string DeleteWarning => Model.Type switch
+    {
+        BoxType.Todo => "该待办盒中的所有事项（包括归档历史）将一并删除，此操作无法撤销。",
+        BoxType.Mapping => "只会移除映射引用，源文件不会被移动或删除。",
+        BoxType.Smart => "只会移除规则和映射引用，源文件不会被移动或删除。",
+        _ => "收纳盒内的文件将恢复到原来的位置；如有重名会自动加后缀。"
+    };
+
+    public void ApplyVisualStyle(BoxVisualStyle visualStyle)
+    {
+        if (_visualStyle == visualStyle)
+        {
+            return;
+        }
+
+        _visualStyle = visualStyle;
+        OnPropertyChanged(nameof(VisualStyle));
+        OnPropertyChanged(nameof(IsPixelStyle));
+        OnPropertyChanged(nameof(VisualStyleLabel));
+    }
+
+    public void ApplyPositionLockState(bool isPositionLocked)
+    {
+        if (!SetProperty(
+                ref _isPositionLocked,
+                isPositionLocked,
+                nameof(IsPositionLocked)))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(PositionLockButtonToolTip));
+        OnPropertyChanged(nameof(PositionLockButtonAutomationName));
+    }
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task ToggleTitleVisibilityAsync()
+    {
+        var isVisible = !IsTitleVisible;
+        await _drawerService.SetSettingAsync(
+            GetTitleVisibilitySettingKey(Id),
+            isVisible.ToString());
+        ApplyTitleVisibility(isVisible);
+        WeakReferenceMessenger.Default.Send(
+            new BoxTitleVisibilityChangedMessage(Id, isVisible));
+    }
+
+    internal async Task LoadTitleVisibilityAsync()
+    {
+        var saved = await _drawerService.GetSettingAsync(GetTitleVisibilitySettingKey(Id));
+        if (saved is null && IsDrawerBox)
+        {
+            saved = await _drawerService.GetSettingAsync(
+                GetLegacyDrawerTitleVisibilitySettingKey(Id));
+        }
+
+        ApplyTitleVisibility(!bool.TryParse(saved, out var isVisible) || isVisible);
+    }
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task ToggleFileNameVisibilityAsync()
+    {
+        if (!SupportsFileNameVisibility)
+        {
+            return;
+        }
+
+        var isVisible = !IsFileNameVisible;
+        await _drawerService.SetSettingAsync(
+            GetFileNameVisibilitySettingKey(Id),
+            isVisible.ToString());
+        ApplyFileNameVisibility(isVisible);
+        WeakReferenceMessenger.Default.Send(
+            new BoxFileNameVisibilityChangedMessage(Id, isVisible));
+    }
+
+    internal async Task LoadFileNameVisibilityAsync()
+    {
+        var saved = await _drawerService.GetSettingAsync(GetFileNameVisibilitySettingKey(Id));
+        ApplyFileNameVisibility(bool.TryParse(saved, out var isVisible) && isVisible);
+    }
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task ApplyDrawerSortModeAsync(DrawerItemSortMode sortMode)
+    {
+        if (!SupportsSorting || _drawerItemSortMode == sortMode)
+        {
+            return;
+        }
+
+        await _drawerService.SetSettingAsync(
+            GetBoxSortModeSettingKey(Id),
+            sortMode.ToString());
+        ApplyDrawerSortMode(sortMode);
+        WeakReferenceMessenger.Default.Send(new DrawerSortModeChangedMessage(Id, sortMode));
+    }
+
+    internal async Task LoadDrawerSortModeAsync()
+    {
+        if (!SupportsSorting)
+        {
+            return;
+        }
+
+        var saved = await _drawerService.GetSettingAsync(GetBoxSortModeSettingKey(Id));
+        if (saved is null && IsDrawerBox)
+        {
+            // 迁移抽屉盒旧的 DrawerSortMode: 设置值。
+            saved = await _drawerService.GetSettingAsync(GetDrawerSortModeSettingKey(Id));
+        }
+
+        ApplyDrawerSortMode(
+            Enum.TryParse<DrawerItemSortMode>(saved, ignoreCase: true, out var sortMode)
+                ? sortMode
+                : DrawerItemSortMode.Free);
+    }
+
+    private void ApplyDrawerSortMode(DrawerItemSortMode sortMode)
+    {
+        if (!SetProperty(ref _drawerItemSortMode, sortMode, nameof(DrawerItemSortMode)))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(IsFreeSort));
+        OnPropertyChanged(nameof(IsDrawerSortByName));
+        OnPropertyChanged(nameof(IsDrawerSortBySize));
+        OnPropertyChanged(nameof(IsDrawerSortByItemType));
+        OnPropertyChanged(nameof(IsDrawerSortByModifiedDate));
+        OnPropertyChanged(nameof(DrawerSortModeLabel));
+    }
+
+    private void ApplyTitleVisibility(bool isVisible)
+    {
+        if (!SetProperty(
+                ref _isTitleVisible,
+                isVisible,
+                nameof(IsTitleVisible)))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(TitleVisibilityToolTip));
+        OnPropertyChanged(nameof(TitleVisibilityAutomationName));
+    }
+
+    private void ApplyFileNameVisibility(bool isVisible)
+    {
+        LayoutSettings.IsFileNameVisible = isVisible;
+        if (!SetProperty(
+                ref _isFileNameVisible,
+                isVisible,
+                nameof(IsFileNameVisible)))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(FileNameVisibilityAutomationName));
+    }
+}

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\QHHDesktopStorageBox.Core\QHHDesktopStorageBox.Core.csproj" />
+    <ProjectReference Include="..\QHHDesktopStorageBox.Native\QHHDesktopStorageBox.Native.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- Low-memory in-process pinyin index for fast Chinese filename search. -->
+    <PackageReference Include="TinyPinyin" Version="1.1.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyTitle>QHH Desktop Storage Box</AssemblyTitle>
+    <Product>QHH Desktop Storage Box</Product>
+    <Description>Lightweight Windows desktop storage boxes built with native WPF.</Description>
+    <Company>QHH</Company>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Keep native WPF runtime components inside the self-contained single-file executable. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Assets\app.ico" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,285 @@
+using System.Windows;
+using System.Windows.Media;
+using QHHDesktopStorageBox.App.Infrastructure;
+
+namespace QHHDesktopStorageBox.App.Tests;
+
+[Collection("AppThemeManager")]
+public sealed class AppThemeManagerTests
+{
+    [Theory]
+    [InlineData(AppTheme.Moe, "#FFFFFBFC", "#FFD5DDE6", "#FFEEF2F6")]
+    [InlineData(AppTheme.Glass, "#DE24272C", "#38FFFFFF", "#24FFFFFF")]
+    [InlineData(AppTheme.Crystal, "#66FFFFFF", "#66FFFFFF", "#3DFFFFFF")]
+    public void AppearanceDefaults_ReproduceMainPaletteExactly(
+        AppTheme theme, string surface, string border, string frame)
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        Assert.Equal(Parse(surface), AppThemeManager.GetDesktopBoxColor(theme, "GlassSurfaceBrush",
+            AppThemeManager.GetBoxOpacity(theme)));
+        Assert.Equal(Parse(border), AppThemeManager.GetDesktopBoxBorderColor(theme));
+        Assert.Equal(Parse(frame), AppThemeManager.GetDesktopIconFrameColor(theme));
+        Assert.Equal(Parse(border), AppThemeManager.GetDesktopIconFrameBorderColor(theme));
+    }
+
+    [Theory]
+    [InlineData(AppTheme.Moe)]
+    [InlineData(AppTheme.Glass)]
+    [InlineData(AppTheme.Crystal)]
+    public void MissingOverrides_PreserveExistingCustomizedAppearance(AppTheme theme)
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        try
+        {
+            foreach (var opacity in new[] { 0.1, 0.4, 0.68765, 1.0 })
+            {
+                AppThemeManager.SetBoxOpacity(theme, opacity);
+                var border = AppThemeManager.GetDesktopBoxColor(theme, "GlassStrokeBrush", opacity);
+                var frame = AppThemeManager.GetDesktopBoxColor(theme, "GlassInnerBrush", opacity);
+                Assert.Equal(border, AppThemeManager.GetDesktopBoxBorderColor(theme));
+                Assert.Equal(frame, AppThemeManager.GetDesktopIconFrameColor(theme));
+                Assert.Equal(border, AppThemeManager.GetDesktopIconFrameBorderColor(theme));
+            }
+        }
+        finally
+        {
+            AppThemeManager.ResetBoxOpacitiesForTests();
+        }
+    }
+
+    [Theory]
+    [InlineData(AppTheme.Moe)]
+    [InlineData(AppTheme.Glass)]
+    [InlineData(AppTheme.Crystal)]
+    public void AppearanceControls_AreIndependentAndSupportBothEndpoints(AppTheme theme)
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        try
+        {
+            var opacity = AppThemeManager.GetBoxOpacity(theme);
+            var frame = AppThemeManager.GetDesktopIconFrameColor(theme);
+            var surface = AppThemeManager.GetDesktopBoxColor(theme, "GlassSurfaceBrush", opacity);
+            var text = AppThemeManager.GetDesktopBoxColor(theme, "TextPrimaryBrush", opacity);
+            foreach (var value in new[] { 0d, 0.5, 1d })
+            {
+                AppThemeManager.SetBoxBorderOpacity(theme, value);
+                Assert.Equal((byte)Math.Round(255 * value), AppThemeManager.GetDesktopBoxBorderColor(theme).A);
+                Assert.Equal(frame, AppThemeManager.GetDesktopIconFrameColor(theme));
+            }
+
+            var border = AppThemeManager.GetDesktopBoxBorderColor(theme);
+            foreach (var value in new[] { 0d, 1d })
+            {
+                AppThemeManager.SetIconFrameOpacity(theme, value);
+                Assert.Equal((byte)(255 * value), AppThemeManager.GetDesktopIconFrameColor(theme).A);
+                Assert.Equal((byte)(255 * value), AppThemeManager.GetDesktopIconFrameBorderColor(theme).A);
+                Assert.Equal(border, AppThemeManager.GetDesktopBoxBorderColor(theme));
+            }
+
+            Assert.Equal(opacity, AppThemeManager.GetBoxOpacity(theme));
+            Assert.Equal(surface, AppThemeManager.GetDesktopBoxColor(theme, "GlassSurfaceBrush", opacity));
+            Assert.Equal(text, AppThemeManager.GetDesktopBoxColor(theme, "TextPrimaryBrush", opacity));
+        }
+        finally
+        {
+            AppThemeManager.ResetBoxOpacitiesForTests();
+        }
+    }
+
+    [Theory]
+    [InlineData(AppTheme.Moe)]
+    [InlineData(AppTheme.Glass)]
+    [InlineData(AppTheme.Crystal)]
+    public void ReturningToDisplayedDefault_PreservesExactFillAndStrokeAlpha(AppTheme theme)
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        try
+        {
+            var frame = AppThemeManager.GetDesktopIconFrameColor(theme);
+            var border = AppThemeManager.GetDesktopBoxBorderColor(theme);
+            AppThemeManager.SetBoxBorderOpacity(theme, 0);
+            AppThemeManager.SetIconFrameOpacity(theme, 0);
+            AppThemeManager.SetBoxBorderOpacity(theme, 1 - Math.Round((1 - border.A / 255d) * 100) / 100);
+            AppThemeManager.SetIconFrameOpacity(theme, 1 - Math.Round((1 - frame.A / 255d) * 100) / 100);
+            Assert.Equal(border, AppThemeManager.GetDesktopBoxBorderColor(theme));
+            Assert.Equal(frame, AppThemeManager.GetDesktopIconFrameColor(theme));
+            Assert.Equal(border, AppThemeManager.GetDesktopIconFrameBorderColor(theme));
+        }
+        finally
+        {
+            AppThemeManager.ResetBoxOpacitiesForTests();
+        }
+    }
+
+    [Fact]
+    public void DesktopOverrides_DoNotChangeEditorOrSharedBrushes()
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        var before = new ResourceDictionary();
+        AppThemeManager.ApplyEditorOpacityResources(before);
+        try
+        {
+            AppThemeManager.SetBoxBorderOpacity(AppThemeManager.CurrentTheme, 0);
+            AppThemeManager.SetIconFrameOpacity(AppThemeManager.CurrentTheme, 0);
+            var desktop = new ResourceDictionary();
+            AppThemeManager.ApplyDesktopBoxResources(desktop);
+            Assert.Equal((byte)0, ((SolidColorBrush)desktop["DesktopBoxBorderBrush"]).Color.A);
+            Assert.True(((SolidColorBrush)desktop["DesktopIconFrameBrush"]).IsFrozen);
+            AppThemeManager.ApplyEditorOpacityResources(desktop);
+            Assert.Equal(before.Count, desktop.Count);
+            foreach (var key in before.Keys)
+            {
+                Assert.Equal(((SolidColorBrush)before[key]).Color, ((SolidColorBrush)desktop[key]).Color);
+            }
+        }
+        finally
+        {
+            AppThemeManager.ResetBoxOpacitiesForTests();
+        }
+    }
+
+    private static Color Parse(string color) => (Color)ColorConverter.ConvertFromString(color);
+
+    [Fact]
+    public void SetBoxOpacity_RemembersEachThemeAndRaisesOnlyForChanges()
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        var changes = new List<ThemeBoxOpacityChangedEventArgs>();
+        EventHandler<ThemeBoxOpacityChangedEventArgs> handler = (_, change) => changes.Add(change);
+        AppThemeManager.BoxOpacityChanged += handler;
+
+        try
+        {
+            AppThemeManager.SetBoxOpacity(AppTheme.Moe, 0.65);
+            AppThemeManager.SetBoxOpacity(AppTheme.Moe, 0.65);
+            AppThemeManager.SetBoxOpacity(AppTheme.Glass, 0.80);
+
+            Assert.Equal(0.65, AppThemeManager.GetBoxOpacity(AppTheme.Moe), 3);
+            Assert.Equal(0.80, AppThemeManager.GetBoxOpacity(AppTheme.Glass), 3);
+            Assert.Equal(AppThemeManager.DefaultBoxOpacity, AppThemeManager.GetBoxOpacity(AppTheme.Crystal), 3);
+            Assert.Collection(
+                changes,
+                change =>
+                {
+                    Assert.Equal(AppTheme.Moe, change.Theme);
+                    Assert.Equal(0.65, change.Opacity, 3);
+                },
+                change =>
+                {
+                    Assert.Equal(AppTheme.Glass, change.Theme);
+                    Assert.Equal(0.80, change.Opacity, 3);
+                });
+        }
+        finally
+        {
+            AppThemeManager.BoxOpacityChanged -= handler;
+            AppThemeManager.ResetBoxOpacitiesForTests();
+        }
+    }
+
+    [Fact]
+    public void OpacityCurve_PreservesCrystalPresetAndMakesMaximumFullyOpaque()
+    {
+        var surface = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Crystal,
+            "GlassSurfaceBrush",
+            AppThemeManager.DefaultBoxOpacity);
+        var panel = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Crystal,
+            "PanelBrush",
+            AppThemeManager.DefaultBoxOpacity);
+        var fullyOpaqueProfile = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Crystal,
+            "GlassSurfaceBrush",
+            AppThemeManager.MaximumBoxOpacity);
+
+        Assert.Equal((Color)ColorConverter.ConvertFromString("#66FFFFFF"), surface);
+        Assert.Equal((Color)ColorConverter.ConvertFromString("#66FFFFFF"), panel);
+        Assert.Equal((Color)ColorConverter.ConvertFromString("#FFFFFFFF"), fullyOpaqueProfile);
+    }
+
+    [Theory]
+    [InlineData("AppBackgroundBrush", "#EE111317")]
+    [InlineData("PanelBrush", "#E024272C")]
+    [InlineData("PanelAltBrush", "#CF1B1E22")]
+    [InlineData("GlassSurfaceBrush", "#DE24272C")]
+    public void LegacyGlassOpacity_ReproducesOldThemeColors(string key, string expectedColor)
+    {
+        var color = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Glass,
+            key,
+            AppThemeManager.GetLegacyBoxOpacity(AppTheme.Glass));
+
+        Assert.Equal((Color)ColorConverter.ConvertFromString(expectedColor), color);
+    }
+
+    [Fact]
+    public void MaximumGlassOpacity_IsActuallyOpaque()
+    {
+        var surface = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Glass,
+            "GlassSurfaceBrush",
+            AppThemeManager.MaximumBoxOpacity);
+
+        Assert.Equal((Color)ColorConverter.ConvertFromString("#FF24272C"), surface);
+    }
+
+    [Fact]
+    public void EditorSurfaceOpacity_PreservesItsOwnColorAndBecomesFullyOpaqueAtMaximum()
+    {
+        var transparentSurface = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Crystal,
+            "ControlCenterSurfaceBrush",
+            AppThemeManager.DefaultBoxOpacity);
+        var opaqueSurface = AppThemeManager.GetDesktopBoxColor(
+            AppTheme.Crystal,
+            "ControlCenterSurfaceBrush",
+            AppThemeManager.MaximumBoxOpacity);
+
+        Assert.Equal((Color)ColorConverter.ConvertFromString("#7BF7F7FA"), transparentSurface);
+        Assert.Equal((Color)ColorConverter.ConvertFromString("#FFF9FBFD"), opaqueSurface);
+    }
+
+    [Fact]
+    public void SetBoxOpacity_ClampsUnsafeValues()
+    {
+        AppThemeManager.ResetBoxOpacitiesForTests();
+        try
+        {
+            AppThemeManager.SetBoxOpacity(AppTheme.Moe, -1);
+            Assert.Equal(
+                AppThemeManager.MinimumBoxOpacity,
+                AppThemeManager.GetBoxOpacity(AppTheme.Moe),
+                3);
+
+            AppThemeManager.SetBoxOpacity(AppTheme.Moe, 5);
+            Assert.Equal(
+                AppThemeManager.MaximumBoxOpacity,
+                AppThemeManager.GetBoxOpacity(AppTheme.Moe),
+                3);
+        }
+        finally
+        {
+            AppThemeManager.ResetBoxOpacitiesForTests();
+        }
+    }
+
+    [Fact]
+    public void ClearEditorOpacityResources_RemovesOnlyEditorThemeOverrides()
+    {
+        var resources = new ResourceDictionary
+        {
+            ["ControlCenterSurfaceBrush"] = Brushes.Transparent,
+            ["PanelBrush"] = Brushes.Transparent,
+            ["TextPrimaryBrush"] = Brushes.Black,
+            ["UnrelatedResource"] = "keep"
+        };
+
+        AppThemeManager.ClearEditorOpacityResources(resources);
+
+        Assert.False(resources.Contains("ControlCenterSurfaceBrush"));
+        Assert.False(resources.Contains("PanelBrush"));
+        Assert.False(resources.Contains("TextPrimaryBrush"));
+        Assert.Equal("keep", resources["UnrelatedResource"]);
+    }
+}
