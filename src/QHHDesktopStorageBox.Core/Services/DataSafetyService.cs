@@ -89,46 +89,47 @@ public sealed class DataSafetyService
 
         try
         {
-            Directory.CreateDirectory(stagingRoot);
-            if (!File.Exists(_paths.DatabasePath))
-            {
-                throw new InvalidOperationException("数据库文件不存在，无法创建完整备份。");
-            }
-
-            File.Copy(
-                _paths.DatabasePath,
-                Path.Combine(stagingRoot, AppPaths.DatabaseFileName),
-                overwrite: false);
-
-            if (Directory.Exists(_paths.BoxesDirectory))
-            {
-                CopyDirectory(
-                    _paths.BoxesDirectory,
-                    Path.Combine(stagingRoot, AppPaths.BoxesDirectoryName),
-                    cancellationToken);
-            }
-
             var manifest = new BackupManifest(
                 BackupFormatVersion,
                 BackupProductName,
                 applicationVersion,
                 createdAt,
                 sourceRoot);
-            await File.WriteAllTextAsync(
-                Path.Combine(stagingRoot, BackupManifestFileName),
-                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }),
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                cancellationToken);
-
-            if (File.Exists(temporaryArchivePath))
-            {
-                File.Delete(temporaryArchivePath);
-            }
-
             await Task.Run(
                 () =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    Directory.CreateDirectory(stagingRoot);
+                    if (!File.Exists(_paths.DatabasePath))
+                    {
+                        throw new InvalidOperationException("数据库文件不存在，无法创建完整备份。");
+                    }
+
+                    File.Copy(
+                        _paths.DatabasePath,
+                        Path.Combine(stagingRoot, AppPaths.DatabaseFileName),
+                        overwrite: false);
+
+                    if (Directory.Exists(_paths.BoxesDirectory))
+                    {
+                        CopyDirectory(
+                            _paths.BoxesDirectory,
+                            Path.Combine(stagingRoot, AppPaths.BoxesDirectoryName),
+                            cancellationToken);
+                    }
+
+                    File.WriteAllText(
+                        Path.Combine(stagingRoot, BackupManifestFileName),
+                        JsonSerializer.Serialize(
+                            manifest,
+                            new JsonSerializerOptions { WriteIndented = true }),
+                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+                    if (File.Exists(temporaryArchivePath))
+                    {
+                        File.Delete(temporaryArchivePath);
+                    }
+
                     ZipFile.CreateFromDirectory(
                         stagingRoot,
                         temporaryArchivePath,
@@ -306,48 +307,54 @@ public sealed class DataSafetyService
             ? null
             : new DriveInfo(driveRoot);
 
-        var report = new StringBuilder();
-        report.AppendLine("QHH Desktop Storage Box diagnostic report");
-        report.AppendLine("Generated: " + DateTimeOffset.Now.ToString("O"));
-        report.AppendLine("Application version: " + applicationVersion);
-        report.AppendLine("Windows: " + Environment.OSVersion);
-        report.AppendLine("Architecture: " + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
-        report.AppendLine("Data root: " + RedactUserPath(_paths.RootDirectory));
-        report.AppendLine("Database exists: " + File.Exists(_paths.DatabasePath));
-        report.AppendLine("Database bytes: " + databaseSize);
-        report.AppendLine("Boxes: " + boxes.Count);
-        report.AppendLine("Items: " + items.Count);
-        report.AppendLine("Reference items scanned: " + brokenReferences.ScannedReferenceCount);
-        report.AppendLine("Broken references: " + brokenReferences.MissingReferences.Count);
-        if (driveInfo is not null)
-        {
-            report.AppendLine("Data drive free bytes: " + driveInfo.AvailableFreeSpace);
-            report.AppendLine("Data drive total bytes: " + driveInfo.TotalSize);
-        }
-
-        report.AppendLine();
-        report.AppendLine("Broken mapping/smart references");
-        if (brokenReferences.MissingReferences.Count == 0)
-        {
-            report.AppendLine("None");
-        }
-        else
-        {
-            foreach (var reference in brokenReferences.MissingReferences)
+        var reportText = await Task.Run(
+            () =>
             {
-                report.AppendLine(
-                    $"- box={reference.BoxName}; item={reference.DisplayName}; "
-                    + $"kind={reference.ItemKind}; path={RedactUserPath(reference.SourcePath)}");
-            }
-        }
+                var report = new StringBuilder();
+                report.AppendLine("QHH Desktop Storage Box diagnostic report");
+                report.AppendLine("Generated: " + DateTimeOffset.Now.ToString("O"));
+                report.AppendLine("Application version: " + applicationVersion);
+                report.AppendLine("Windows: " + Environment.OSVersion);
+                report.AppendLine("Architecture: " + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+                report.AppendLine("Data root: " + RedactUserPath(_paths.RootDirectory));
+                report.AppendLine("Database exists: " + File.Exists(_paths.DatabasePath));
+                report.AppendLine("Database bytes: " + databaseSize);
+                report.AppendLine("Boxes: " + boxes.Count);
+                report.AppendLine("Items: " + items.Count);
+                report.AppendLine("Reference items scanned: " + brokenReferences.ScannedReferenceCount);
+                report.AppendLine("Broken references: " + brokenReferences.MissingReferences.Count);
+                if (driveInfo is not null)
+                {
+                    report.AppendLine("Data drive free bytes: " + driveInfo.AvailableFreeSpace);
+                    report.AppendLine("Data drive total bytes: " + driveInfo.TotalSize);
+                }
 
-        report.AppendLine();
-        report.AppendLine("Recent log tail");
-        AppendLogTail(report, cancellationToken);
+                report.AppendLine();
+                report.AppendLine("Broken mapping/smart references");
+                if (brokenReferences.MissingReferences.Count == 0)
+                {
+                    report.AppendLine("None");
+                }
+                else
+                {
+                    foreach (var reference in brokenReferences.MissingReferences)
+                    {
+                        report.AppendLine(
+                            $"- box={reference.BoxName}; item={reference.DisplayName}; "
+                            + $"kind={reference.ItemKind}; path={RedactUserPath(reference.SourcePath)}");
+                    }
+                }
+
+                report.AppendLine();
+                report.AppendLine("Recent log tail");
+                AppendLogTail(report, cancellationToken);
+                return report.ToString();
+            },
+            cancellationToken);
 
         await File.WriteAllTextAsync(
             reportPath,
-            report.ToString(),
+            reportText,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             cancellationToken);
 
