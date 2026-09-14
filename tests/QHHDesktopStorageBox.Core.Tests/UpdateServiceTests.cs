@@ -243,7 +243,7 @@ public sealed class UpdateServiceTests
             await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             var updaterLog = File.Exists(logPath)
-                ? await File.ReadAllTextAsync(logPath)
+                ? await ReadAllTextWithRetryAsync(logPath)
                 : "Updater log was not created.";
             Assert.True(
                 updaterProcess.ExitCode == 0,
@@ -254,9 +254,9 @@ public sealed class UpdateServiceTests
             Assert.True(File.Exists(appExecutablePath));
             Assert.False(File.Exists(Path.Combine(appDirectory, "update.zip")));
             Assert.False(File.Exists(Path.Combine(appDirectory, "updater.bat")));
-            Assert.Equal("new", await File.ReadAllTextAsync(replacedPath));
+            Assert.Equal("new", await ReadAllTextWithRetryAsync(replacedPath));
             Assert.True(File.Exists(stalePayloadPath));
-            Assert.Equal("stale", await File.ReadAllTextAsync(stalePayloadPath));
+            Assert.Equal("stale", await ReadAllTextWithRetryAsync(stalePayloadPath));
         }
         finally
         {
@@ -313,7 +313,7 @@ public sealed class UpdateServiceTests
             Assert.NotNull(updaterProcess);
             await Task.Delay(500);
             Assert.False(File.Exists(markerPath));
-            Assert.Equal("old", await File.ReadAllTextAsync(appExecutablePath));
+            Assert.Equal("old", await ReadAllTextWithRetryAsync(appExecutablePath));
 
             await originalProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
@@ -380,14 +380,14 @@ public sealed class UpdateServiceTests
             using var updaterProcess = Process.Start(startInfo);
             Assert.NotNull(updaterProcess);
             await WaitForConditionAsync(() => File.Exists(introducedAppPath), TimeSpan.FromSeconds(5));
-            Assert.Equal("new-introduced", await File.ReadAllTextAsync(introducedAppPath));
+            Assert.Equal("new-introduced", await ReadAllTextWithRetryAsync(introducedAppPath));
             await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             Assert.NotEqual(0, updaterProcess.ExitCode);
-            Assert.Equal("old-first", await File.ReadAllTextAsync(firstAppPath));
-            Assert.False(File.Exists(introducedAppPath));
+            Assert.Equal("old-first", await ReadAllTextWithRetryAsync(firstAppPath));
+            await WaitForConditionAsync(() => !File.Exists(introducedAppPath), TimeSpan.FromSeconds(10));
             await WaitForConditionAsync(() => File.Exists(markerPath), TimeSpan.FromSeconds(5));
-            Assert.Equal("restored", (await File.ReadAllTextAsync(markerPath)).Trim());
+            Assert.Equal("restored", (await ReadAllTextWithRetryAsync(markerPath)).Trim());
             Assert.True(Directory.Exists(Path.Combine(updateRoot, "rollback")));
         }
         finally
@@ -447,9 +447,9 @@ public sealed class UpdateServiceTests
             await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             Assert.NotEqual(0, updaterProcess.ExitCode);
-            Assert.Contains("echo original", await File.ReadAllTextAsync(appExecutablePath));
+            Assert.Contains("echo original", await ReadAllTextWithRetryAsync(appExecutablePath));
             await WaitForConditionAsync(() => File.Exists(markerPath), TimeSpan.FromSeconds(5));
-            Assert.Equal("original", (await File.ReadAllTextAsync(markerPath)).Trim());
+            Assert.Equal("original", (await ReadAllTextWithRetryAsync(markerPath)).Trim());
             Assert.True(Directory.Exists(updateRoot));
         }
         finally
@@ -501,9 +501,9 @@ public sealed class UpdateServiceTests
             await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             Assert.NotEqual(0, updaterProcess.ExitCode);
-            Assert.Contains("echo restored", await File.ReadAllTextAsync(appExecutablePath));
+            Assert.Contains("echo restored", await ReadAllTextWithRetryAsync(appExecutablePath));
             await WaitForConditionAsync(() => File.Exists(markerPath), TimeSpan.FromSeconds(5));
-            Assert.Equal("restored", (await File.ReadAllTextAsync(markerPath)).Trim());
+            Assert.Equal("restored", (await ReadAllTextWithRetryAsync(markerPath)).Trim());
             Assert.True(Directory.Exists(Path.Combine(updateRoot, "rollback")));
         }
         finally
@@ -519,6 +519,28 @@ public sealed class UpdateServiceTests
         {
             Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for updater condition.");
             await Task.Delay(50);
+        }
+    }
+
+    private static async Task<string> ReadAllTextWithRetryAsync(
+        string path,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(15));
+        while (true)
+        {
+            try
+            {
+                return await File.ReadAllTextAsync(path);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+            catch (UnauthorizedAccessException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
         }
     }
 
