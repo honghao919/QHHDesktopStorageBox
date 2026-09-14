@@ -43,7 +43,10 @@ public sealed class UpdateService
     public async Task CleanupLegacyUpdaterArtifactsAsync()
     {
         var appDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        var removedCount = await Task.Run(() => CleanupLegacyUpdaterArtifacts(appDirectory));
+        var tempRoot = Path.Combine(Path.GetTempPath(), UpdateRootFolderName);
+        var removedCount = await Task.Run(() =>
+            CleanupLegacyUpdaterArtifacts(appDirectory)
+            + CleanupStaleUpdateArtifacts(tempRoot, Path.GetTempPath()));
         if (removedCount > 0)
         {
             _logger.Info($"Removed {removedCount} legacy updater artifact(s).");
@@ -336,9 +339,7 @@ powershell.exe -NoProfile -Command "$process = Start-Process -FilePath $env:QHH_
 if errorlevel 1 goto start_failed
 
 >>"%QHH_DESKTOP_STORAGE_BOX_UPDATE_LOG%" echo [%date% %time%] Updated application confirmed startup. Update completed.
-cd /d "%TEMP%"
-rmdir /s /q "%QHH_DESKTOP_STORAGE_BOX_UPDATE_ROOT%" >nul 2>&1
-start "" /b "%ComSpec%" /d /c del /q "%~f0" >nul 2>&1 & exit /b 0
+exit /b 0
 
 :backup_failed
 set "QHH_DESKTOP_STORAGE_BOX_FAILURE_CODE=%errorlevel%"
@@ -477,6 +478,63 @@ exit /b 1
             {
                 removedCount++;
             }
+        }
+
+        return removedCount;
+    }
+
+    internal static int CleanupStaleUpdateArtifacts(
+        string updateRoot,
+        string tempDirectory,
+        DateTimeOffset? now = null)
+    {
+        var currentTime = now ?? DateTimeOffset.UtcNow;
+        var removedCount = 0;
+        try
+        {
+            if (Directory.Exists(updateRoot))
+            {
+                foreach (var directory in Directory.EnumerateDirectories(updateRoot))
+                {
+                    if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out _)
+                        || Directory.GetLastWriteTimeUtc(directory) > currentTime.UtcDateTime.AddDays(-7))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        Directory.Delete(directory, recursive: true);
+                        removedCount++;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            if (Directory.Exists(tempDirectory))
+            {
+                foreach (var updaterScript in Directory.EnumerateFiles(
+                             tempDirectory,
+                             "QHHDesktopStorageBoxUpdater-*.bat",
+                             SearchOption.TopDirectoryOnly))
+                {
+                    if (File.GetLastWriteTimeUtc(updaterScript) > currentTime.UtcDateTime.AddDays(-1))
+                    {
+                        continue;
+                    }
+
+                    if (TryDeleteFile(updaterScript))
+                    {
+                        removedCount++;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Cleanup is best-effort and must never block application startup.
         }
 
         return removedCount;

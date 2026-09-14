@@ -191,7 +191,54 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
-    public async Task UpdaterScript_OverlaysPayloadPreservesUnrelatedFilesAndCleansTemporaryFiles()
+    public async Task CleanupStaleUpdateArtifacts_DeletesOnlyExpiredContent()
+    {
+        var testRoot = Path.Combine(
+            Path.GetTempPath(),
+            "QHHDesktopStorageBox Cleanup Tests",
+            Guid.NewGuid().ToString("N"));
+        var updateRoot = Path.Combine(testRoot, "updates");
+        var tempDirectory = Path.Combine(testRoot, "temp");
+        var oldUpdate = Path.Combine(updateRoot, Guid.NewGuid().ToString("N"));
+        var currentUpdate = Path.Combine(updateRoot, Guid.NewGuid().ToString("N"));
+        var oldScript = Path.Combine(
+            tempDirectory,
+            $"QHHDesktopStorageBoxUpdater-{Guid.NewGuid():N}.bat");
+        var currentScript = Path.Combine(
+            tempDirectory,
+            $"QHHDesktopStorageBoxUpdater-{Guid.NewGuid():N}.bat");
+        Directory.CreateDirectory(oldUpdate);
+        Directory.CreateDirectory(currentUpdate);
+        Directory.CreateDirectory(tempDirectory);
+        File.WriteAllText(Path.Combine(oldUpdate, "payload.bin"), "old");
+        File.WriteAllText(Path.Combine(currentUpdate, "payload.bin"), "current");
+        File.WriteAllText(oldScript, "old");
+        File.WriteAllText(currentScript, "current");
+        var now = DateTimeOffset.UtcNow;
+        Directory.SetLastWriteTimeUtc(oldUpdate, now.UtcDateTime.AddDays(-8));
+        File.SetLastWriteTimeUtc(oldScript, now.UtcDateTime.AddDays(-2));
+
+        try
+        {
+            var removed = UpdateService.CleanupStaleUpdateArtifacts(
+                updateRoot,
+                tempDirectory,
+                now);
+
+            Assert.Equal(2, removed);
+            Assert.False(Directory.Exists(oldUpdate));
+            Assert.False(File.Exists(oldScript));
+            Assert.True(Directory.Exists(currentUpdate));
+            Assert.True(File.Exists(currentScript));
+        }
+        finally
+        {
+            await DeleteDirectoryWithRetryAsync(testRoot, TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task UpdaterScript_OverlaysPayloadAndPreservesUnrelatedFiles()
     {
         var testRoot = Path.Combine(
             Path.GetTempPath(),
@@ -249,8 +296,6 @@ public sealed class UpdateServiceTests
                 updaterProcess.ExitCode == 0,
                 $"Updater exited with code {updaterProcess.ExitCode}.{Environment.NewLine}{updaterLog}");
             await WaitForConditionAsync(() => File.Exists(markerPath), TimeSpan.FromSeconds(5));
-            await WaitForConditionAsync(() => !Directory.Exists(updateRoot), TimeSpan.FromSeconds(8));
-            await WaitForConditionAsync(() => !File.Exists(updaterPath), TimeSpan.FromSeconds(5));
             Assert.True(File.Exists(appExecutablePath));
             Assert.False(File.Exists(Path.Combine(appDirectory, "update.zip")));
             Assert.False(File.Exists(Path.Combine(appDirectory, "updater.bat")));
