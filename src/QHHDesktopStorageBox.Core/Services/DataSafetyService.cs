@@ -254,7 +254,8 @@ public sealed class DataSafetyService
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!referenceBoxes.TryGetValue(item.BoxId, out var box)
-                        || string.IsNullOrWhiteSpace(item.SourcePath))
+                        || string.IsNullOrWhiteSpace(item.SourcePath)
+                        || InstalledApplicationReference.IsReference(item.SourcePath))
                     {
                         continue;
                     }

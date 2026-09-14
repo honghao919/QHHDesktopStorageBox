@@ -202,15 +202,28 @@
                             VerticalAlignment="Center"
                             Margin="0,0,8,0">
                     <StackPanel.Style>
-                        <Style TargetType="{x:Type StackPanel}">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsMappingBox}" Value="True">
+                            <Style TargetType="{x:Type StackPanel}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                <DataTrigger Binding="{Binding SupportsViewMode}" Value="True">
                                     <Setter Property="Visibility" Value="Visible" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
+                    <Button Click="OnAddInstalledApplicationClick"
+                            ToolTip="添加系统应用"
+                            Margin="0,0,4,0"
+                            Style="{StaticResource MappingModeButtonStyle}">
+                        <Path Data="M 8,2 L 8,14 M 2,8 L 14,8"
+                              Stroke="{DynamicResource TextMutedBrush}"
+                              StrokeThickness="1.7"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              Width="12"
+                              Height="12"
+                              Stretch="Uniform" />
+                    </Button>
                     <Button Click="OnUseMappingGridModeClick"
                             ToolTip="网格视图"
                             Margin="0,0,4,0">

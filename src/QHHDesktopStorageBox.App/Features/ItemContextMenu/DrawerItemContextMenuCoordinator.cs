@@ -1,5 +1,6 @@
 using System.IO;
 using QHHDesktopStorageBox.App.ViewModels;
+using QHHDesktopStorageBox.Core.Models;
 using QHHDesktopStorageBox.Native.Files;
 using QHHDesktopStorageBox.Native.Shell;
 
@@ -47,7 +48,9 @@ internal sealed class DrawerItemContextMenuCoordinator(DesktopBoxViewModel host)
 
             var menu = new DrawerItemContextMenuWindow(
                 WindowsFileShellActions.CanRunAsAdministrator(path, pathState.IsDirectory),
+                showReveal: !pathState.IsInstalledApplication,
                 host.IsMappingBox,
+                pathState.IsInstalledApplication,
                 host.IsPixelStyle,
                 x,
                 y);
@@ -93,15 +96,20 @@ internal sealed class DrawerItemContextMenuCoordinator(DesktopBoxViewModel host)
         CloseActiveMenu();
     }
 
-    internal static (bool Exists, bool IsDirectory) InspectPath(string? path)
+    internal static (bool Exists, bool IsDirectory, bool IsInstalledApplication) InspectPath(
+        string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            return (false, false);
+            return (false, false, false);
         }
 
+        var isInstalledApplication = InstalledApplicationReference.IsReference(path);
         var isDirectory = Directory.Exists(path);
-        return (isDirectory || File.Exists(path), isDirectory);
+        return (
+            isInstalledApplication || isDirectory || File.Exists(path),
+            isDirectory,
+            isInstalledApplication);
     }
 
     private async Task ExecuteAsync(

@@ -64,9 +64,16 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
         }
     }
 
-    public string KindLabel => Model.ItemKind == ItemKind.Directory ? "文件夹" : "文件";
+    public bool IsInstalledApplication =>
+        InstalledApplicationReference.IsReference(Model.SourcePath);
 
-    public string KindBadge => Model.ItemKind == ItemKind.Directory ? "DIR" : "FILE";
+    public string KindLabel => IsInstalledApplication
+        ? "应用"
+        : Model.ItemKind == ItemKind.Directory ? "文件夹" : "文件";
+
+    public string KindBadge => IsInstalledApplication
+        ? "APP"
+        : Model.ItemKind == ItemKind.Directory ? "DIR" : "FILE";
 
     public string PathLabel => Model.EffectivePath ?? string.Empty;
 
@@ -148,7 +155,9 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
         set => SetProperty(ref _isDragSource, value);
     }
 
-    public string FallbackIconText => Model.ItemKind == ItemKind.Directory ? "DIR" : GetFallbackExtension();
+    public string FallbackIconText => IsInstalledApplication
+        ? "APP"
+        : Model.ItemKind == ItemKind.Directory ? "DIR" : GetFallbackExtension();
 
     public ImageSource? IconImage
     {

@@ -423,6 +423,68 @@ public sealed class DrawerService
         return _repository.UpdateItemGridPositionsAsync(positions, cancellationToken);
     }
 
+    public async Task<DrawerItem> AddInstalledApplicationAsync(
+        Guid boxId,
+        string appUserModelId,
+        string displayName,
+        int? gridColumn = null,
+        int? gridRow = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        var box = await _repository.GetBoxAsync(boxId, cancellationToken)
+            ?? throw new InvalidOperationException("Box does not exist.");
+        if (box.Type is not (BoxType.Normal or BoxType.Pixel or BoxType.Mapping or BoxType.Inbox))
+        {
+            throw new InvalidOperationException("This box type does not accept installed applications.");
+        }
+
+        var applicationIdentifier = appUserModelId.Trim();
+        string sourcePath;
+        if (Path.IsPathRooted(applicationIdentifier))
+        {
+            sourcePath = PathSafety.GetFullExistingPath(applicationIdentifier);
+        }
+        else
+        {
+            sourcePath = InstalledApplicationReference.Create(applicationIdentifier);
+        }
+        var existing = (await _repository.GetItemsAsync(boxId, cancellationToken))
+            .FirstOrDefault(item => string.Equals(
+                item.SourcePath,
+                sourcePath,
+                StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            if (gridColumn is not null && gridRow is not null)
+            {
+                await _repository.UpdateItemGridPositionAsync(
+                    existing.Id,
+                    gridColumn,
+                    gridRow,
+                    cancellationToken);
+            }
+
+            return existing;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var item = new DrawerItem(
+            Guid.NewGuid(),
+            box.Id,
+            displayName.Trim(),
+            ItemKind.File,
+            sourcePath,
+            null,
+            await _repository.GetNextItemSortOrderAsync(boxId, cancellationToken),
+            now,
+            now,
+            gridColumn,
+            gridRow);
+        await _repository.AddItemAsync(item, cancellationToken);
+        return item;
+    }
+
     public async Task MoveItemToBoxAsync(
         Guid itemId,
         Guid targetBoxId,
@@ -459,6 +521,21 @@ public sealed class DrawerService
         var storedPath = item.StoredPath;
         var displayName = item.DisplayName;
         var isDirectory = item.ItemKind == ItemKind.Directory;
+
+        if (InstalledApplicationReference.IsReference(item.SourcePath))
+        {
+            await _repository.MoveItemToBoxAsync(
+                item,
+                targetBox.Id,
+                displayName,
+                item.SourcePath,
+                storedPath: null,
+                targetSortOrder,
+                gridColumn,
+                gridRow,
+                cancellationToken);
+            return;
+        }
 
         if (targetBox.Type == BoxType.Mapping)
         {

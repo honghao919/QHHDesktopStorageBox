@@ -29,6 +29,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
     private const double EdgeExpandThreshold = 14;
     private const double VisibleHeaderRowHeight = 24;
     private const string MappingViewModeSettingPrefix = "MappingViewMode:";
+    private const string ViewModeSettingPrefix = "BoxViewMode:";
     private const string MappingListWidthSettingPrefix = "MappingListWidth:";
     private const string TodoPanelSizeSettingPrefix = "TodoPanelSize:";
     private const string MappingListViewMode = "List";
@@ -281,6 +282,12 @@ public sealed class DesktopBoxViewModel : ObservableObject
 
     public bool IsSmartBox => Type == BoxType.Smart;
 
+    public bool SupportsViewMode =>
+        Type is BoxType.Normal or BoxType.Pixel or BoxType.Mapping;
+
+    public bool SupportsInstalledApplications =>
+        Type is BoxType.Normal or BoxType.Pixel or BoxType.Mapping;
+
     /// <summary>
     /// 固定 m×n 格尺寸仅适用于普通网格收纳盒；其余盒型始终自适应。
     /// </summary>
@@ -347,7 +354,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
     public double HeaderRowHeight => CalculateHeaderRowHeight(
         IsHeaderVisible,
         IsDrawerBox,
-        IsMappingListMode,
+        IsListMode,
         LayoutSettings.MappingListMargin.Top,
         LayoutSettings.MappingListMargin.Bottom);
 
@@ -399,9 +406,11 @@ public sealed class DesktopBoxViewModel : ObservableObject
         + DrawerSecondaryPanelChrome,
         MaximumDrawerSecondaryPanelDimension);
 
-    public bool IsMappingListMode => IsMappingBox && _isMappingListMode;
+    public bool IsListMode => SupportsViewMode && _isMappingListMode;
 
-    public bool IsGridMode => !IsMappingListMode;
+    public bool IsMappingListMode => IsListMode;
+
+    public bool IsGridMode => SupportsViewMode && !IsListMode;
 
     public string TypeLabel => _box.Type switch
     {
@@ -1301,25 +1310,94 @@ public sealed class DesktopBoxViewModel : ObservableObject
 
     public async Task LoadMappingViewModeAsync()
     {
-        if (!IsMappingBox)
+        if (!SupportsViewMode)
         {
             return;
         }
 
         try
         {
-            var savedMode = await _drawerService.GetSettingAsync(MappingViewModeSettingPrefix + BoxId.ToString("N"));
+            var savedMode = await _drawerService.GetSettingAsync(GetViewModeSettingKey(BoxId));
+            if (savedMode is null && IsMappingBox)
+            {
+                savedMode = await _drawerService.GetSettingAsync(
+                    MappingViewModeSettingPrefix + BoxId.ToString("N"));
+            }
+
             SetMappingListMode(string.Equals(savedMode, MappingListViewMode, StringComparison.OrdinalIgnoreCase));
         }
         catch (Exception exception)
         {
-            _logger.Error(exception, "Failed to load mapping view mode.");
+            _logger.Error(exception, "Failed to load box view mode.");
         }
     }
 
+    public async Task<bool> AddInstalledApplicationAsync(string displayName, string appId)
+    {
+        if (!SupportsInstalledApplications
+            || IsBusy
+            || string.IsNullOrWhiteSpace(displayName)
+            || string.IsNullOrWhiteSpace(appId))
+        {
+            return false;
+        }
+
+        try
+        {
+            var sourcePath = InstalledApplicationReference.Create(appId);
+            var existing = Items.FirstOrDefault(item => string.Equals(
+                item.Model.SourcePath,
+                sourcePath,
+                StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                ActiveItemsListSelectionRequested?.Invoke(existing);
+                StatusText = $"{existing.DisplayName} 已在盒子中";
+                return false;
+            }
+
+            if (!TryGetAvailableDropSlot(0, 0, null, out var slot))
+            {
+                StatusText = "盒子已满，无法添加应用";
+                return false;
+            }
+
+            IsBusy = true;
+            var item = await _drawerService.AddInstalledApplicationAsync(
+                BoxId,
+                appId,
+                displayName,
+                slot.Column,
+                slot.Row);
+            await LoadAsync();
+            var viewModel = Items.FirstOrDefault(candidate => candidate.Id == item.Id);
+            if (viewModel is not null)
+            {
+                ActiveItemsListSelectionRequested?.Invoke(viewModel);
+                viewModel.ReloadIconIfNeeded();
+            }
+
+            StatusText = $"已添加应用：{displayName}";
+            ItemsChanged?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to add an installed application.");
+            StatusText = exception.Message;
+            return false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public event Action<DrawerItemViewModel>? ActiveItemsListSelectionRequested;
+
     private async Task SetMappingViewModeAsync(bool useListMode)
     {
-        if (!IsMappingBox)
+        if (!SupportsViewMode)
         {
             return;
         }
@@ -1328,17 +1406,20 @@ public sealed class DesktopBoxViewModel : ObservableObject
         {
             SetMappingListMode(useListMode);
             var mode = useListMode ? MappingListViewMode : MappingGridViewMode;
-            await _drawerService.SetSettingAsync(MappingViewModeSettingPrefix + BoxId.ToString("N"), mode);
+            await _drawerService.SetSettingAsync(GetViewModeSettingKey(BoxId), mode);
         }
         catch (Exception exception)
         {
-            _logger.Error(exception, "Failed to save mapping view mode.");
+            _logger.Error(exception, "Failed to save box view mode.");
         }
     }
 
+    internal static string GetViewModeSettingKey(Guid boxId) =>
+        ViewModeSettingPrefix + boxId.ToString("N");
+
     private void SetMappingListMode(bool value)
     {
-        if (SetProperty(ref _isMappingListMode, value, nameof(IsMappingListMode)))
+        if (SetProperty(ref _isMappingListMode, value, nameof(IsListMode)))
         {
             if (value && IsFreeSort)
             {
@@ -1348,6 +1429,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
                     .ThenBy(item => item.Model.SortOrder));
             }
 
+            OnPropertyChanged(nameof(IsMappingListMode));
             OnPropertyChanged(nameof(IsGridMode));
             OnPropertyChanged(nameof(HeaderRowHeight));
             HideDragPreview();
@@ -1357,7 +1439,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
 
     public void ResizeMappingListWidth(double width)
     {
-        if (!IsMappingBox)
+        if (!SupportsViewMode)
         {
             return;
         }
@@ -1371,7 +1453,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
 
     public async Task LoadMappingListWidthAsync()
     {
-        if (!IsMappingBox)
+        if (!SupportsViewMode)
         {
             return;
         }
@@ -1405,7 +1487,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
 
     public async Task SaveMappingListWidthAsync()
     {
-        if (!IsMappingBox)
+        if (!SupportsViewMode)
         {
             return;
         }
