@@ -83,23 +83,21 @@ jobs:
       - name: Publish packages
         shell: pwsh
         run: |
-          $arguments = @(
-            "-Version", $env:RELEASE_VERSION,
-            "-Configuration", "Release",
-            "-RuntimeIdentifier", "win-x64"
-          )
+          $parameters = @{
+            Version = $env:RELEASE_VERSION
+            Configuration = "Release"
+            RuntimeIdentifier = "win-x64"
+          }
           if ($env:SIGNING_CERTIFICATE_PATH) {
-            $arguments += @(
-              "-SigningCertificatePath", $env:SIGNING_CERTIFICATE_PATH,
-              "-SigningCertificatePassword", $env:SIGNING_CERTIFICATE_PASSWORD
-            )
+            $parameters.SigningCertificatePath = $env:SIGNING_CERTIFICATE_PATH
+            $parameters.SigningCertificatePassword = $env:SIGNING_CERTIFICATE_PASSWORD
             if ($env:SIGNTOOL_PATH) {
-              $arguments += @("-SignToolPath", $env:SIGNTOOL_PATH)
+              $parameters.SignToolPath = $env:SIGNTOOL_PATH
             }
           } else {
             Write-Warning "Signing secrets are not configured; publishing unsigned artifacts."
           }
-          & .\tools\Publish-QHHDesktopStorageBox.ps1 @arguments
+          & .\tools\Publish-QHHDesktopStorageBox.ps1 @parameters
 
       - name: Verify release assets
         shell: pwsh

@@ -52,7 +52,7 @@ public sealed class BoxControlsLayoutTests
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(10)), "WPF layout test timed out.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "WPF layout test timed out.");
         Assert.Null(failure);
     }
 

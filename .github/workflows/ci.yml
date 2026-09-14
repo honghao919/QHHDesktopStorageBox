@@ -42,13 +42,22 @@ jobs:
       - name: Build
         run: dotnet build QHHDesktopStorageBox.sln --configuration Release --no-restore --nologo
 
-      - name: Test
+      - name: Test Core
         run: >-
-          dotnet test QHHDesktopStorageBox.sln
+          dotnet test tests/QHHDesktopStorageBox.Core.Tests/QHHDesktopStorageBox.Core.Tests.csproj
           --configuration Release
           --no-build
           --nologo
-          --logger "trx;LogFileName=qhh-tests.trx"
+          --logger "trx;LogFileName=qhh-core-tests.trx"
+          --results-directory TestResults
+
+      - name: Test App
+        run: >-
+          dotnet test tests/QHHDesktopStorageBox.App.Tests/QHHDesktopStorageBox.App.Tests.csproj
+          --configuration Release
+          --no-build
+          --nologo
+          --logger "trx;LogFileName=qhh-app-tests.trx"
           --results-directory TestResults
 
       - name: Upload test results
