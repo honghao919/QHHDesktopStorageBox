@@ -44,7 +44,9 @@ public sealed class DrawerRepository
             if (databaseExisted && schemaVersion < CurrentSchemaVersion)
             {
                 await ExecuteNonQueryAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken);
-                CreateSchemaBackup(databaseDirectory, schemaVersion);
+                await Task.Run(
+                    () => CreateSchemaBackup(databaseDirectory, schemaVersion),
+                    cancellationToken);
             }
 
             await using var transaction =
