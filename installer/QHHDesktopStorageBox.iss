@@ -55,7 +55,11 @@ UninstallDisplayName={#MyAppName}
 ; boxes/items there, so we never touch it from the installer.
 
 [Languages]
+; The Chocolatey Inno Setup package used by GitHub Actions omits some optional
+; language files. Keep the installer buildable and fall back to English.
+#if FileExists(AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl")
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+#endif
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
