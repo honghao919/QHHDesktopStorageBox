@@ -4,6 +4,10 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [string]$RuntimeIdentifier = 'win-x64',
+    [string]$SigningCertificatePath,
+    [string]$SigningCertificatePassword,
+    [string]$SignToolPath,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com',
     [switch]$SkipInstaller
 )
 
@@ -24,6 +28,68 @@ if ($Version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
 
 if (-not (Test-Path -LiteralPath $manualPath)) {
     throw "User manual is missing: $manualPath"
+}
+
+function Resolve-SignToolPath {
+    param([string]$RequestedPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $resolvedRequestedPath = (Resolve-Path -LiteralPath $RequestedPath -ErrorAction Stop).Path
+        if (-not (Test-Path -LiteralPath $resolvedRequestedPath -PathType Leaf)) {
+            throw "SignTool was not found: $resolvedRequestedPath"
+        }
+
+        return $resolvedRequestedPath
+    }
+
+    $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $kitsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+    if (Test-Path -LiteralPath $kitsRoot) {
+        return Get-ChildItem -LiteralPath $kitsRoot -Recurse -Filter signtool.exe -File |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+
+    return $null
+}
+
+function Invoke-AuthenticodeSigning {
+    param(
+        [string]$FilePath,
+        [string]$CertificatePath,
+        [string]$CertificatePassword,
+        [string]$RequestedSignToolPath,
+        [string]$TimestampServer
+    )
+
+    $resolvedSignToolPath = Resolve-SignToolPath -RequestedPath $RequestedSignToolPath
+    if (-not $resolvedSignToolPath) {
+        throw 'SignTool is required when a signing certificate is provided.'
+    }
+
+    & $resolvedSignToolPath sign `
+        /fd SHA256 `
+        /td SHA256 `
+        /tr $TimestampServer `
+        /f $CertificatePath `
+        /p $CertificatePassword `
+        $FilePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Authenticode signing failed for $FilePath with exit code $LASTEXITCODE."
+    }
+}
+
+$shouldSign = -not [string]::IsNullOrWhiteSpace($SigningCertificatePath)
+if ($shouldSign) {
+    $SigningCertificatePath = (Resolve-Path -LiteralPath $SigningCertificatePath -ErrorAction Stop).Path
+    if ([string]::IsNullOrWhiteSpace($SigningCertificatePassword)) {
+        throw 'SigningCertificatePassword is required when SigningCertificatePath is provided.'
+    }
 }
 
 $publishDir = Join-Path $repoRoot "publish\v$Version"
@@ -52,6 +118,15 @@ if ($LASTEXITCODE -ne 0) {
 $appExe = Join-Path $publishDir 'QHHDesktopStorageBox.App.exe'
 if (-not (Test-Path -LiteralPath $appExe)) {
     throw "Publish output is missing $appExe."
+}
+
+if ($shouldSign) {
+    Invoke-AuthenticodeSigning `
+        -FilePath $appExe `
+        -CertificatePath $SigningCertificatePath `
+        -CertificatePassword $SigningCertificatePassword `
+        -RequestedSignToolPath $SignToolPath `
+        -TimestampServer $TimestampUrl
 }
 
 Copy-Item -LiteralPath $manualPath -Destination (Join-Path $publishDir 'QHH-Desktop-Storage-Box-User-Manual.pdf') -Force
@@ -93,6 +168,15 @@ if (-not $SkipInstaller) {
 
     if (-not (Test-Path -LiteralPath $installerPath)) {
         throw "Inno Setup completed but did not produce $installerPath."
+    }
+
+    if ($shouldSign) {
+        Invoke-AuthenticodeSigning `
+            -FilePath $installerPath `
+            -CertificatePath $SigningCertificatePath `
+            -CertificatePassword $SigningCertificatePassword `
+            -RequestedSignToolPath $SignToolPath `
+            -TimestampServer $TimestampUrl
     }
 
     (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + (Split-Path $installerPath -Leaf) |

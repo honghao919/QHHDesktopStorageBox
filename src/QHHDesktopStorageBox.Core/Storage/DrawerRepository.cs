@@ -5,6 +5,9 @@ namespace QHHDesktopStorageBox.Core.Storage;
 
 public sealed class DrawerRepository
 {
+    private const int CurrentSchemaVersion = 1;
+    private const int RetainedSchemaBackupCount = 5;
+    private const string BackupsDirectoryName = "Backups";
     private readonly string _databasePath;
 
     public DrawerRepository(string databasePath)
@@ -23,89 +26,152 @@ public sealed class DrawerRepository
         try
         {
             Directory.CreateDirectory(databaseDirectory);
+            var databaseExisted = File.Exists(_databasePath);
 
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
             // journal_mode 需要在同目录创建旁路文件；单独执行便于定位 Error 14。
             await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode=WAL;", cancellationToken);
+            var schemaVersion = await ReadSchemaVersionAsync(connection, cancellationToken);
+            if (schemaVersion > CurrentSchemaVersion)
+            {
+                throw new InvalidOperationException(
+                    $"数据库结构版本 {schemaVersion} 高于当前程序支持的版本 {CurrentSchemaVersion}。"
+                    + "请升级应用，避免旧版本覆盖新数据。");
+            }
 
-            await ExecuteNonQueryAsync(
-                connection,
-                """
-                CREATE TABLE IF NOT EXISTS Boxes (
-                    Id TEXT PRIMARY KEY,
-                    Name TEXT NOT NULL,
-                    Type INTEGER NOT NULL,
-                    StoragePath TEXT NULL,
-                    SortOrder INTEGER NOT NULL,
-                    CreatedAt TEXT NOT NULL,
-                    UpdatedAt TEXT NOT NULL
-                );
+            if (databaseExisted && schemaVersion < CurrentSchemaVersion)
+            {
+                await ExecuteNonQueryAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken);
+                CreateSchemaBackup(databaseDirectory, schemaVersion);
+            }
 
-                CREATE TABLE IF NOT EXISTS Items (
-                    Id TEXT PRIMARY KEY,
-                    BoxId TEXT NOT NULL,
-                    DisplayName TEXT NOT NULL,
-                    ItemKind INTEGER NOT NULL,
-                    SourcePath TEXT NULL,
-                    StoredPath TEXT NULL,
-                    SortOrder INTEGER NOT NULL,
-                    GridColumn INTEGER NULL,
-                    GridRow INTEGER NULL,
-                    CreatedAt TEXT NOT NULL,
-                    UpdatedAt TEXT NOT NULL,
-                    FOREIGN KEY(BoxId) REFERENCES Boxes(Id) ON DELETE CASCADE
-                );
+            await using var transaction =
+                (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await ExecuteNonQueryAsync(
+                    connection,
+                    """
+                    CREATE TABLE IF NOT EXISTS Boxes (
+                        Id TEXT PRIMARY KEY,
+                        Name TEXT NOT NULL,
+                        Type INTEGER NOT NULL,
+                        StoragePath TEXT NULL,
+                        SortOrder INTEGER NOT NULL,
+                        CreatedAt TEXT NOT NULL,
+                        UpdatedAt TEXT NOT NULL
+                    );
 
-                CREATE TABLE IF NOT EXISTS AppSettings (
-                    Key TEXT PRIMARY KEY,
-                    Value TEXT NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS Items (
+                        Id TEXT PRIMARY KEY,
+                        BoxId TEXT NOT NULL,
+                        DisplayName TEXT NOT NULL,
+                        ItemKind INTEGER NOT NULL,
+                        SourcePath TEXT NULL,
+                        StoredPath TEXT NULL,
+                        SortOrder INTEGER NOT NULL,
+                        GridColumn INTEGER NULL,
+                        GridRow INTEGER NULL,
+                        CreatedAt TEXT NOT NULL,
+                        UpdatedAt TEXT NOT NULL,
+                        FOREIGN KEY(BoxId) REFERENCES Boxes(Id) ON DELETE CASCADE
+                    );
 
-                CREATE TABLE IF NOT EXISTS Todos (
-                    Id TEXT PRIMARY KEY,
-                    BoxId TEXT NOT NULL,
-                    Title TEXT NOT NULL,
-                    IsCompleted INTEGER NOT NULL,
-                    IsArchived INTEGER NOT NULL DEFAULT 0,
-                    SortOrder INTEGER NOT NULL,
-                    CreatedAt TEXT NOT NULL,
-                    UpdatedAt TEXT NOT NULL,
-                    CompletedAt TEXT NULL,
-                    ArchivedAt TEXT NULL,
-                    FOREIGN KEY(BoxId) REFERENCES Boxes(Id) ON DELETE CASCADE
-                );
+                    CREATE TABLE IF NOT EXISTS AppSettings (
+                        Key TEXT PRIMARY KEY,
+                        Value TEXT NOT NULL
+                    );
 
-                CREATE TABLE IF NOT EXISTS FileOperations (
-                    Id TEXT PRIMARY KEY,
-                    Kind INTEGER NOT NULL,
-                    Description TEXT NOT NULL,
-                    PayloadJson TEXT NOT NULL,
-                    CreatedAt TEXT NOT NULL,
-                    UndoneAt TEXT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS Todos (
+                        Id TEXT PRIMARY KEY,
+                        BoxId TEXT NOT NULL,
+                        Title TEXT NOT NULL,
+                        IsCompleted INTEGER NOT NULL,
+                        IsArchived INTEGER NOT NULL DEFAULT 0,
+                        SortOrder INTEGER NOT NULL,
+                        CreatedAt TEXT NOT NULL,
+                        UpdatedAt TEXT NOT NULL,
+                        CompletedAt TEXT NULL,
+                        ArchivedAt TEXT NULL,
+                        FOREIGN KEY(BoxId) REFERENCES Boxes(Id) ON DELETE CASCADE
+                    );
 
-                CREATE INDEX IF NOT EXISTS IX_Items_BoxId ON Items(BoxId);
-                CREATE INDEX IF NOT EXISTS IX_Items_DisplayName ON Items(DisplayName);
-                CREATE INDEX IF NOT EXISTS IX_FileOperations_CreatedAt
-                    ON FileOperations(CreatedAt DESC);
-                """,
-                cancellationToken);
+                    CREATE TABLE IF NOT EXISTS FileOperations (
+                        Id TEXT PRIMARY KEY,
+                        Kind INTEGER NOT NULL,
+                        Description TEXT NOT NULL,
+                        PayloadJson TEXT NOT NULL,
+                        CreatedAt TEXT NOT NULL,
+                        UndoneAt TEXT NULL
+                    );
 
-            await EnsureColumnAsync(connection, "Items", "GridColumn", "INTEGER NULL", cancellationToken);
-            await EnsureColumnAsync(connection, "Items", "GridRow", "INTEGER NULL", cancellationToken);
-            await EnsureColumnAsync(connection, "Todos", "BoxId", "TEXT NULL", cancellationToken);
-            await EnsureColumnAsync(connection, "Todos", "IsArchived", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
-            await EnsureColumnAsync(connection, "Todos", "ArchivedAt", "TEXT NULL", cancellationToken);
-            await ExecuteNonQueryAsync(
-                connection,
-                "CREATE INDEX IF NOT EXISTS IX_Todos_BoxStateSort ON Todos(BoxId, IsCompleted, SortOrder);",
-                cancellationToken);
-            await ExecuteNonQueryAsync(
-                connection,
-                "CREATE INDEX IF NOT EXISTS IX_Todos_BoxArchiveStateSort ON Todos(BoxId, IsArchived, IsCompleted, SortOrder);",
-                cancellationToken);
+                    CREATE INDEX IF NOT EXISTS IX_Items_BoxId ON Items(BoxId);
+                    CREATE INDEX IF NOT EXISTS IX_Items_DisplayName ON Items(DisplayName);
+                    CREATE INDEX IF NOT EXISTS IX_FileOperations_CreatedAt
+                        ON FileOperations(CreatedAt DESC);
+                    """,
+                    cancellationToken,
+                    transaction);
+
+                await EnsureColumnAsync(
+                    connection,
+                    transaction,
+                    "Items",
+                    "GridColumn",
+                    "INTEGER NULL",
+                    cancellationToken);
+                await EnsureColumnAsync(
+                    connection,
+                    transaction,
+                    "Items",
+                    "GridRow",
+                    "INTEGER NULL",
+                    cancellationToken);
+                await EnsureColumnAsync(
+                    connection,
+                    transaction,
+                    "Todos",
+                    "BoxId",
+                    "TEXT NULL",
+                    cancellationToken);
+                await EnsureColumnAsync(
+                    connection,
+                    transaction,
+                    "Todos",
+                    "IsArchived",
+                    "INTEGER NOT NULL DEFAULT 0",
+                    cancellationToken);
+                await EnsureColumnAsync(
+                    connection,
+                    transaction,
+                    "Todos",
+                    "ArchivedAt",
+                    "TEXT NULL",
+                    cancellationToken);
+                await ExecuteNonQueryAsync(
+                    connection,
+                    "CREATE INDEX IF NOT EXISTS IX_Todos_BoxStateSort ON Todos(BoxId, IsCompleted, SortOrder);",
+                    cancellationToken,
+                    transaction);
+                await ExecuteNonQueryAsync(
+                    connection,
+                    "CREATE INDEX IF NOT EXISTS IX_Todos_BoxArchiveStateSort ON Todos(BoxId, IsArchived, IsCompleted, SortOrder);",
+                    cancellationToken,
+                    transaction);
+                await ExecuteNonQueryAsync(
+                    connection,
+                    $"PRAGMA user_version = {CurrentSchemaVersion};",
+                    cancellationToken,
+                    transaction);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
         }
         catch (Exception exception) when (IsDatabaseAccessFailure(exception))
         {
@@ -1140,18 +1206,57 @@ public sealed class DrawerRepository
         return exception is IOException or UnauthorizedAccessException;
     }
 
-    private static async Task ExecuteNonQueryAsync(
+    private static async Task<int> ReadSchemaVersionAsync(
         SqliteConnection connection,
-        string commandText,
         CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+    }
+
+    private void CreateSchemaBackup(string databaseDirectory, int previousSchemaVersion)
+    {
+        var backupDirectory = Path.Combine(databaseDirectory, BackupsDirectoryName);
+        Directory.CreateDirectory(backupDirectory);
+        var timestamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmssfff");
+        var backupFileName =
+            $"qhhdesktopstoragebox-before-schema-{previousSchemaVersion}-to-{CurrentSchemaVersion}-{timestamp}.db";
+        var backupPath = Path.Combine(backupDirectory, backupFileName);
+        File.Copy(_databasePath, backupPath, overwrite: false);
+
+        foreach (var staleBackup in Directory
+                     .EnumerateFiles(backupDirectory, "qhhdesktopstoragebox-before-schema-*.db")
+                     .Select(path => new FileInfo(path))
+                     .OrderByDescending(file => file.LastWriteTimeUtc)
+                     .Skip(RetainedSchemaBackupCount))
+        {
+            try
+            {
+                staleBackup.Delete();
+            }
+            catch
+            {
+                // A locked old backup must not prevent the application from starting.
+            }
+        }
+    }
+
+    private static async Task ExecuteNonQueryAsync(
+        SqliteConnection connection,
+        string commandText,
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
+    {
+        var command = connection.CreateCommand();
         command.CommandText = commandText;
+        command.Transaction = transaction;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task EnsureColumnAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         string tableName,
         string columnName,
         string columnDefinition,
@@ -1159,6 +1264,7 @@ public sealed class DrawerRepository
     {
         var existingColumnsCommand = connection.CreateCommand();
         existingColumnsCommand.CommandText = $"PRAGMA table_info({tableName});";
+        existingColumnsCommand.Transaction = transaction;
 
         await using (var reader = await existingColumnsCommand.ExecuteReaderAsync(cancellationToken))
         {
@@ -1173,6 +1279,7 @@ public sealed class DrawerRepository
 
         var alterCommand = connection.CreateCommand();
         alterCommand.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};";
+        alterCommand.Transaction = transaction;
         await alterCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 

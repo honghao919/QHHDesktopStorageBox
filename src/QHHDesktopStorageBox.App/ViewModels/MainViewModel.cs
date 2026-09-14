@@ -41,6 +41,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly BoxPositionLockStateStore _boxPositionLockStateStore;
     private readonly AppPaths _appPaths;
     private readonly DataStorageMigrationService _dataStorageMigrationService;
+    private readonly DataSafetyService? _dataSafetyService;
     private BoxViewModel? _selectedBox;
     private CancellationTokenSource? _itemsLoadCts;
     private int _itemsLoadVersion;
@@ -74,7 +75,9 @@ public sealed class MainViewModel : ObservableObject
     private bool _areDesktopIconsHidden;
     private bool _isDesktopDoubleClickEnabled;
     private string _updateStatusText = string.Empty;
+    private string _dataSafetyStatusText = string.Empty;
     private bool _isCheckingUpdate;
+    private bool _isDataSafetyBusy;
     private string? _pendingUpdateSha256;
     private double _iconDpiScaleX = 1;
     private double _iconDpiScaleY = 1;
@@ -90,7 +93,8 @@ public sealed class MainViewModel : ObservableObject
         BoxPositionLockStateStore boxPositionLockStateStore,
         AppPaths appPaths,
         DataStorageMigrationService dataStorageMigrationService,
-        AutoHideSettingsStore autoHideSettingsStore)
+        AutoHideSettingsStore autoHideSettingsStore,
+        DataSafetyService? dataSafetyService = null)
     {
         _drawerService = drawerService;
         _todoService = todoService;
@@ -102,6 +106,7 @@ public sealed class MainViewModel : ObservableObject
         _boxPositionLockStateStore = boxPositionLockStateStore;
         _appPaths = appPaths;
         _dataStorageMigrationService = dataStorageMigrationService;
+        _dataSafetyService = dataSafetyService;
         _autoHideSettingsStore = autoHideSettingsStore;
         TodoBoxDetail = new TodoBoxDetailViewModel(todoService, logger);
         TodoBoxDetail.ItemsChanged += OnTodoBoxDetailItemsChanged;
@@ -601,6 +606,18 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public string CurrentDataDirectory => _appPaths.RootDirectory;
 
+    public string DataSafetyStatusText
+    {
+        get => _dataSafetyStatusText;
+        private set => SetProperty(ref _dataSafetyStatusText, value);
+    }
+
+    public bool IsDataSafetyBusy
+    {
+        get => _isDataSafetyBusy;
+        private set => SetProperty(ref _isDataSafetyBusy, value);
+    }
+
     /// <summary>
     /// 将数据目录整体迁移到新文件夹。成功后需重启应用才会切换到新目录。
     /// </summary>
@@ -624,6 +641,116 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    public async Task<DataBackupResult> CreateDataBackupAsync(string destinationPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        IsDataSafetyBusy = true;
+        DataSafetyStatusText = "正在创建完整备份…";
+        try
+        {
+            var result = await RequireDataSafetyService().CreateBackupAsync(
+                destinationPath,
+                GetCurrentVersion().ToString(3));
+            DataSafetyStatusText = $"备份完成：{FormatFileSize(result.SizeBytes)}";
+            StatusText = DataSafetyStatusText;
+            _logger.Info($"Data backup created at {result.ArchivePath}.");
+            return result;
+        }
+        catch (Exception exception)
+        {
+            DataSafetyStatusText = "备份失败";
+            _logger.Error(exception, "Failed to create data backup.");
+            throw;
+        }
+        finally
+        {
+            IsDataSafetyBusy = false;
+        }
+    }
+
+    public async Task<AppPaths> RestoreDataBackupAsync(
+        string archivePath,
+        string targetDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
+        IsDataSafetyBusy = true;
+        DataSafetyStatusText = "正在验证并恢复备份…";
+        try
+        {
+            var restoredPaths = await RequireDataSafetyService().RestoreBackupAsync(
+                archivePath,
+                targetDirectory);
+            DataSafetyStatusText = "备份已恢复，重启后生效";
+            StatusText = DataSafetyStatusText;
+            _logger.Info($"Data backup restored to {restoredPaths.RootDirectory}. Restart required.");
+            return restoredPaths;
+        }
+        catch (Exception exception)
+        {
+            DataSafetyStatusText = "恢复失败";
+            _logger.Error(exception, "Failed to restore data backup.");
+            throw;
+        }
+        finally
+        {
+            IsDataSafetyBusy = false;
+        }
+    }
+
+    public async Task<BrokenReferenceScanResult> ScanBrokenReferencesAsync()
+    {
+        IsDataSafetyBusy = true;
+        DataSafetyStatusText = "正在检查映射与智能盒引用…";
+        try
+        {
+            var result = await RequireDataSafetyService().ScanBrokenReferencesAsync();
+            DataSafetyStatusText = result.MissingReferences.Count == 0
+                ? $"引用检查完成：{result.ScannedReferenceCount} 项均可用"
+                : $"发现 {result.MissingReferences.Count} 个失效引用";
+            StatusText = DataSafetyStatusText;
+            return result;
+        }
+        catch (Exception exception)
+        {
+            DataSafetyStatusText = "引用检查失败";
+            _logger.Error(exception, "Failed to scan broken references.");
+            throw;
+        }
+        finally
+        {
+            IsDataSafetyBusy = false;
+        }
+    }
+
+    public async Task<DiagnosticReportResult> CreateDiagnosticReportAsync(string destinationPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        IsDataSafetyBusy = true;
+        DataSafetyStatusText = "正在生成诊断报告…";
+        try
+        {
+            var result = await RequireDataSafetyService().CreateDiagnosticReportAsync(
+                destinationPath,
+                GetCurrentVersion().ToString(3));
+            DataSafetyStatusText = result.BrokenReferenceCount == 0
+                ? "诊断报告已生成，未发现失效引用"
+                : $"诊断报告已生成，包含 {result.BrokenReferenceCount} 个失效引用";
+            StatusText = DataSafetyStatusText;
+            return result;
+        }
+        catch (Exception exception)
+        {
+            DataSafetyStatusText = "诊断报告生成失败";
+            _logger.Error(exception, "Failed to create diagnostic report.");
+            throw;
+        }
+        finally
+        {
+            IsDataSafetyBusy = false;
         }
     }
 
@@ -2334,5 +2461,31 @@ public sealed class MainViewModel : ObservableObject
         var assembly = System.Reflection.Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
         return version ?? new Version(1, 0, 0);
+    }
+
+    private DataSafetyService RequireDataSafetyService()
+    {
+        return _dataSafetyService
+            ?? throw new InvalidOperationException("数据安全服务尚未初始化。");
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024L * 1024L)
+        {
+            return $"{bytes / (1024d * 1024d * 1024d):0.00} GB";
+        }
+
+        if (bytes >= 1024L * 1024L)
+        {
+            return $"{bytes / (1024d * 1024d):0.00} MB";
+        }
+
+        if (bytes >= 1024L)
+        {
+            return $"{bytes / 1024d:0.0} KB";
+        }
+
+        return bytes + " B";
     }
 }

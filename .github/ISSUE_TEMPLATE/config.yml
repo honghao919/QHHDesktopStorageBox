@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/honghao919/QHHDesktopStorageBox/security/advisories/new
+    about: Report security issues privately.
+  - name: User manual
+    url: https://github.com/honghao919/QHHDesktopStorageBox/blob/main/docs/QHH-Desktop-Storage-Box-User-Manual.md
+    about: Read installation, update, and recovery instructions.

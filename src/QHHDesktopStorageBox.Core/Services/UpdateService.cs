@@ -148,19 +148,19 @@ public sealed class UpdateService
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(expectedSha256))
+            if (string.IsNullOrWhiteSpace(expectedSha256))
             {
-                var actualHash = await ComputeSha256HexAsync(zipPath);
-                if (!string.Equals(actualHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.Info($"Update hash mismatch. expected={expectedSha256} actual={actualHash}");
-                    TryDeleteDirectory(tempRoot);
-                    return false;
-                }
+                _logger.Info("Rejected update because the release asset has no published SHA-256.");
+                TryDeleteDirectory(tempRoot);
+                return false;
             }
-            else
+
+            var actualHash = await ComputeSha256HexAsync(zipPath);
+            if (!string.Equals(actualHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.Info("Update asset has no published SHA-256; continuing with URL allowlist only.");
+                _logger.Info($"Update hash mismatch. expected={expectedSha256} actual={actualHash}");
+                TryDeleteDirectory(tempRoot);
+                return false;
             }
 
             await Task.Run(() =>
@@ -501,8 +501,7 @@ exit /b 1
         }
 
         if (host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
-            || host.Equals("release-assets.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase))
+            || host.Equals("release-assets.githubusercontent.com", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -563,6 +562,19 @@ exit /b 1
         if (checksums is not null && IsAllowedDownloadUrl(checksums.BrowserDownloadUrl))
         {
             return await ReadSha256FromAssetAsync(checksums.BrowserDownloadUrl, packageAsset.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(packageAsset.Digest))
+        {
+            const string digestPrefix = "sha256:";
+            if (packageAsset.Digest.StartsWith(digestPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var digest = packageAsset.Digest[digestPrefix.Length..].Trim();
+                if (Sha256HexRegex.IsMatch(digest))
+                {
+                    return digest.ToLowerInvariant();
+                }
+            }
         }
 
         return null;
@@ -691,5 +703,8 @@ exit /b 1
 
         [JsonPropertyName("browser_download_url")]
         public string BrowserDownloadUrl { get; init; } = string.Empty;
+
+        [JsonPropertyName("digest")]
+        public string? Digest { get; init; }
     }
 }

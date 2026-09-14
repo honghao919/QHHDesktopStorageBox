@@ -1,0 +1,61 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Build.props
+            global.json
+
+      - name: Restore
+        run: dotnet restore QHHDesktopStorageBox.sln --nologo
+
+      - name: Build
+        run: dotnet build QHHDesktopStorageBox.sln --configuration Release --no-restore --nologo
+
+      - name: Test
+        run: >-
+          dotnet test QHHDesktopStorageBox.sln
+          --configuration Release
+          --no-build
+          --nologo
+          --logger "trx;LogFileName=qhh-tests.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+          if-no-files-found: warn
+          retention-days: 14

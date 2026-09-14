@@ -5,6 +5,8 @@
 <h1 align="center">QHH Desktop Storage Box</h1>
 
 <p align="center">
+  <a href="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml"><img src="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml/badge.svg" alt="Windows CI" /></a>
+  <a href="https://github.com/honghao919/QHHDesktopStorageBox/releases/latest"><img src="https://img.shields.io/github/v/release/honghao919/QHHDesktopStorageBox?display_name=tag" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/version-1.3.12-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" alt="License" />
   <img src="https://img.shields.io/badge/docs%20%26%20assets-CC%20BY--NC--SA%204.0-lightgrey" alt="Docs & Assets License" />
@@ -48,6 +50,66 @@ English: QHH Desktop Storage Box is a lightweight Windows desktop file drawer bu
 - **图标名称模式** — 悬停提示可在完整文件路径与精简文件名之间切换，快捷方式（`.lnk`）自动去掉扩展名
 - **系统托盘** — 最小化到系统托盘，不占用任务栏
 - **单实例运行** — 防止重复启动
+- **完整备份与恢复** — 将数据库和普通盒文件导出为 ZIP，并安全恢复到新的空目录
+- **数据升级保护** — 数据库结构升级前自动保留最近 5 个版本化数据库备份
+- **失效引用检查** — 扫描映射盒和智能盒中已经失效的源路径
+- **诊断报告** — 汇总版本、数据目录、容量、失效引用和最近日志，并自动隐藏用户主目录
+
+## 下载与安装
+
+请从 [GitHub Releases](https://github.com/honghao919/QHHDesktopStorageBox/releases/latest) 下载最新版本。
+
+- 安装版：运行 `QHHDesktopStorageBox-Setup-vX.Y.Z-x64.exe`。
+- 便携版：完整解压 `QHHDesktopStorageBox-vX.Y.Z-win-x64.zip` 后运行 `QHHDesktopStorageBox.App.exe`。
+- 不要只复制便携版中的单个 EXE；WPF 运行所需的附属文件必须与 EXE 一起保留。
+- 不要以管理员身份运行。管理员进程无法接收普通桌面拖放。
+
+正式发布同时提供安装包、便携 ZIP 和各自的 SHA-256 文件。更新程序会拒绝没有已发布校验值的更新包。
+
+## 数据备份与恢复
+
+设置页“数据安全与恢复”提供四项操作：
+
+- **创建完整备份**：导出 SQLite 数据库、普通盒文件、抽屉盒/像素盒/收件箱存储和备份清单。
+- **从备份恢复**：先验证备份清单、数据库和压缩包路径，再恢复到用户选择的空文件夹。
+- **检查失效引用**：扫描映射盒和智能盒的源路径，不会移动或删除任何文件。
+- **生成诊断报告**：输出版本、数据目录、磁盘容量、失效引用和最近日志；用户主目录路径会替换为 `%USERPROFILE%`。
+
+恢复完成后需要重启应用。恢复目标必须为空，应用不会覆盖正在使用的数据目录。
+
+数据库结构升级前，程序会在 `Backups` 子目录自动保留最近 5 个升级前备份：
+
+```text
+%LocalAppData%\QHHDesktopStorageBox\Backups\
+```
+
+## 隐私与网络
+
+- 收纳盒数据库、普通盒文件、日志和设置全部保存在本机。
+- 应用不上传文件、文件名、搜索记录、数据库、日志或使用统计。
+- 网络请求仅用于连接本项目 GitHub 仓库的 Releases，以检查更新和下载用户确认的更新包。
+- 更新下载只允许本项目仓库和 GitHub 官方 Release 资产域名。
+- 更新包必须具有 Release 中发布的 SHA-256；校验失败时不会解压或安装。
+
+## 卸载
+
+可从 Windows“设置 > 应用”或开始菜单卸载。卸载程序只删除程序文件，不删除用户数据。
+
+需要彻底清理时，请在确认不再需要数据后手动删除：
+
+```text
+%LocalAppData%\QHHDesktopStorageBox
+```
+
+如果曾在设置中迁移数据目录，还应删除当时选择的自定义数据目录。
+
+## 已知限制
+
+- Windows 10 的部分桌面宿主和 DPI 行为可能与 Windows 11 不同，优先支持 Windows 11。
+- 映射盒和智能盒依赖源路径。移动源文件、断开网络盘或删除目录后，需要重新检查并修复引用。
+- 正在被其他程序独占使用的文件可能无法移动；应用不会强制结束占用进程。
+- 完整备份不会复制映射盒和智能盒指向的源文件，因为这些文件不属于应用存储目录。
+- 未签名的社区构建可能触发 Windows SmartScreen。正式 Release 可配置 Authenticode 签名。
 
 ## 使用说明
 
@@ -172,16 +234,24 @@ src/QHHDesktopStorageBox.App/bin/Debug/net10.0-windows/QHHDesktopStorageBox.App.
 dotnet test QHHDesktopStorageBox.sln
 ```
 
-测试覆盖：默认收纳盒创建、普通/映射/像素盒导入、重复文件名后缀、跨盒移动、原位还原删除、更新 URL 校验等。
+CI 会在每次推送到 `main` 和 Pull Request 时执行 Release 构建及完整测试。测试覆盖默认收纳盒创建、普通/映射/像素盒导入、重复文件名后缀、跨盒移动、原位还原删除、数据库升级备份、完整备份恢复、失效引用扫描和更新 URL/校验规则。
 
 ## 运行时数据
 
 ```text
 %LocalAppData%\QHHDesktopStorageBox\
   qhhdesktopstoragebox.db          SQLite 数据库
-  Boxes\{BoxId}\          普通收纳盒的文件存储
-  logs\                   运行日志
+  Boxes\{BoxId}\                   普通收纳盒的文件存储
+  Backups\                         数据库结构升级前备份
+  logs\                            运行日志
 ```
+
+## 贡献与安全
+
+- 开发、构建和测试要求见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+- 安全漏洞请使用 [私有漏洞报告](https://github.com/honghao919/QHHDesktopStorageBox/security/advisories/new)，不要公开提交。
+- Release 发布流程位于 `.github/workflows/release.yml`，正式发布需要手动批准；配置签名密钥后会签名主程序和安装包。
 
 ## 开源协议
 

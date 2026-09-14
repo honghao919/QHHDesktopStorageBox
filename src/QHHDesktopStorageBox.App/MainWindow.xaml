@@ -3718,6 +3718,54 @@
                                 </Grid>
                             </Border>
 
+                            <!-- Data Safety Card -->
+                            <Border Background="{DynamicResource PanelBrush}"
+                                    BorderBrush="{DynamicResource BorderBrushSoft}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    Padding="10"
+                                    Margin="0,0,0,6">
+                                <StackPanel>
+                                    <TextBlock Text="数据安全与恢复"
+                                               FontWeight="SemiBold"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="完整备份包含数据库和普通盒内文件。恢复时会写入一个新的空文件夹，验证成功后重启应用。映射盒与智能盒只保存引用，请定期检查失效路径。"
+                                               Margin="0,2,0,7"
+                                               FontSize="10.5"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                    <TextBlock Text="{Binding DataSafetyStatusText}"
+                                               Margin="0,0,0,7"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextMutedBrush}"
+                                               Visibility="{Binding DataSafetyStatusText, Converter={StaticResource NonEmptyToVisibilityConverter}}" />
+                                    <WrapPanel>
+                                        <Button Content="创建完整备份…"
+                                                Click="OnCreateDataBackupClick"
+                                                Height="28"
+                                                Padding="11,0"
+                                                Margin="0,0,6,6" />
+                                        <Button Content="从备份恢复…"
+                                                Click="OnRestoreDataBackupClick"
+                                                Height="28"
+                                                Padding="11,0"
+                                                Margin="0,0,6,6" />
+                                        <Button Content="检查失效引用"
+                                                Click="OnScanBrokenReferencesClick"
+                                                Height="28"
+                                                Padding="11,0"
+                                                Margin="0,0,6,6" />
+                                        <Button Content="生成诊断报告…"
+                                                Click="OnCreateDiagnosticReportClick"
+                                                Height="28"
+                                                Padding="11,0"
+                                                Margin="0,0,0,6" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
                             <!-- Startup Card -->
                                 <Border Background="{DynamicResource PanelBrush}"
                                     BorderBrush="{DynamicResource BorderBrushSoft}"

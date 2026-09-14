@@ -350,6 +350,190 @@ public partial class MainWindow : Window
         Application.Current.Shutdown();
     }
 
+    private async void OnCreateDataBackupClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "创建 QHH Desktop Storage Box 完整备份",
+            Filter = "ZIP 备份 (*.zip)|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            FileName = $"QHHDesktopStorageBox-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await ViewModel.CreateDataBackupAsync(dialog.FileName);
+            MessageBox.Show(
+                this,
+                $"备份已创建：\n{result.ArchivePath}\n\n大小：{result.SizeBytes / 1024d / 1024d:0.00} MB",
+                "完整备份",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to create data backup from the settings page.");
+            MessageBox.Show(
+                this,
+                "创建备份失败：\n" + exception.Message,
+                "完整备份",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private async void OnRestoreDataBackupClick(object sender, RoutedEventArgs e)
+    {
+        var archiveDialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择 QHH Desktop Storage Box ZIP 备份",
+            Filter = "ZIP 备份 (*.zip)|*.zip",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (archiveDialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var targetDialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择用于恢复备份的目标文件夹（必须为空）"
+        };
+        if (targetDialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var targetDirectory = targetDialog.FolderName;
+        var confirm = MessageBox.Show(
+            this,
+            $"将从备份恢复数据到：\n{targetDirectory}\n\n"
+            + "目标文件夹必须为空。恢复完成并重启前，应用不会切换到恢复后的数据。",
+            "恢复完整备份",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            await ViewModel.RestoreDataBackupAsync(archiveDialog.FileName, targetDirectory);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to restore data backup from the settings page.");
+            MessageBox.Show(
+                this,
+                "恢复备份失败：\n" + exception.Message,
+                "恢复完整备份",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        var restart = MessageBox.Show(
+            this,
+            "备份已恢复并通过验证。是否立即重启 QHH Desktop Storage Box？\n\n"
+            + "在重启前，请勿继续修改当前数据。",
+            "恢复完成",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (restart == MessageBoxResult.Yes && Application.Current is App app)
+        {
+            await app.RestartApplicationAsync();
+        }
+    }
+
+    private async void OnScanBrokenReferencesClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var result = await ViewModel.ScanBrokenReferencesAsync();
+            if (result.MissingReferences.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    $"已检查 {result.ScannedReferenceCount} 个映射或智能盒引用，全部可用。",
+                    "引用检查",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var preview = string.Join(
+                Environment.NewLine,
+                result.MissingReferences
+                    .Take(8)
+                    .Select(reference =>
+                        $"• [{reference.BoxName}] {reference.DisplayName}{Environment.NewLine}  {reference.SourcePath}"));
+            var suffix = result.MissingReferences.Count > 8
+                ? $"{Environment.NewLine}{Environment.NewLine}其余 {result.MissingReferences.Count - 8} 项请查看诊断报告。"
+                : string.Empty;
+            MessageBox.Show(
+                this,
+                $"发现 {result.MissingReferences.Count} 个失效引用：{Environment.NewLine}{Environment.NewLine}{preview}{suffix}",
+                "引用检查",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to scan broken references from the settings page.");
+            MessageBox.Show(
+                this,
+                "检查失效引用失败：\n" + exception.Message,
+                "引用检查",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private async void OnCreateDiagnosticReportClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "保存 QHH Desktop Storage Box 诊断报告",
+            Filter = "文本报告 (*.txt)|*.txt",
+            DefaultExt = ".txt",
+            AddExtension = true,
+            FileName = $"QHHDesktopStorageBox-diagnostic-{DateTime.Now:yyyyMMdd-HHmmss}.txt"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await ViewModel.CreateDiagnosticReportAsync(dialog.FileName);
+            MessageBox.Show(
+                this,
+                $"诊断报告已生成：\n{result.ReportPath}\n\n"
+                + $"收纳盒：{result.BoxCount}\n项目：{result.ItemCount}\n失效引用：{result.BrokenReferenceCount}",
+                "诊断报告",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to create a diagnostic report from the settings page.");
+            MessageBox.Show(
+                this,
+                "生成诊断报告失败：\n" + exception.Message,
+                "诊断报告",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
     private async void OnQuickPanelHotKeyPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (!_isCapturingHotKey)

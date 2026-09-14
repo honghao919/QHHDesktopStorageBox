@@ -112,6 +112,8 @@ public partial class App : Application
             var storageLocationStore = StorageLocationStore.ForCurrentUser();
             var dataStorageMigrationService =
                 new DataStorageMigrationService(paths, repository, storageLocationStore);
+            var dataSafetyService =
+                new DataSafetyService(paths, repository, storageLocationStore);
 
             logger.Info("Data directory: " + paths.RootDirectory);
             logger.Info("Database path: " + paths.DatabasePath);
@@ -138,7 +140,8 @@ public partial class App : Application
                 boxPositionLockStateStore,
                 paths,
                 dataStorageMigrationService,
-                autoHideSettingsStore);
+                autoHideSettingsStore,
+                dataSafetyService);
             _desktopBoxManager = new DesktopBoxManager(
                 drawerService,
                 todoService,
