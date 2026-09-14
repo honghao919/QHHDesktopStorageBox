@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml"><img src="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml/badge.svg" alt="Windows CI" /></a>
   <a href="https://github.com/honghao919/QHHDesktopStorageBox/releases/latest"><img src="https://img.shields.io/github/v/release/honghao919/QHHDesktopStorageBox?display_name=tag" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/version-1.3.12-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.3.13-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" alt="License" />
   <img src="https://img.shields.io/badge/docs%20%26%20assets-CC%20BY--NC--SA%204.0-lightgrey" alt="Docs & Assets License" />
   <img src="https://img.shields.io/badge/.NET-10.0-purple" alt=".NET" />
