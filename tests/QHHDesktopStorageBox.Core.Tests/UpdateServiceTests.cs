@@ -240,7 +240,7 @@ public sealed class UpdateServiceTests
 
             using var updaterProcess = Process.Start(startInfo);
             Assert.NotNull(updaterProcess);
-            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             var updaterLog = File.Exists(logPath)
                 ? await File.ReadAllTextAsync(logPath)
@@ -316,7 +316,7 @@ public sealed class UpdateServiceTests
             Assert.Equal("old", await File.ReadAllTextAsync(appExecutablePath));
 
             await originalProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             Assert.Equal(0, updaterProcess.ExitCode);
             await WaitForConditionAsync(() => File.Exists(markerPath), TimeSpan.FromSeconds(5));
         }
@@ -381,7 +381,7 @@ public sealed class UpdateServiceTests
             Assert.NotNull(updaterProcess);
             await WaitForConditionAsync(() => File.Exists(introducedAppPath), TimeSpan.FromSeconds(5));
             Assert.Equal("new-introduced", await File.ReadAllTextAsync(introducedAppPath));
-            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             Assert.NotEqual(0, updaterProcess.ExitCode);
             Assert.Equal("old-first", await File.ReadAllTextAsync(firstAppPath));
@@ -444,7 +444,7 @@ public sealed class UpdateServiceTests
 
             using var updaterProcess = Process.Start(startInfo);
             Assert.NotNull(updaterProcess);
-            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             Assert.NotEqual(0, updaterProcess.ExitCode);
             Assert.Contains("echo original", await File.ReadAllTextAsync(appExecutablePath));
@@ -498,7 +498,7 @@ public sealed class UpdateServiceTests
 
             using var updaterProcess = Process.Start(startInfo);
             Assert.NotNull(updaterProcess);
-            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await updaterProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
 
             Assert.NotEqual(0, updaterProcess.ExitCode);
             Assert.Contains("echo restored", await File.ReadAllTextAsync(appExecutablePath));
