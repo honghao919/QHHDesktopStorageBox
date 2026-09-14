@@ -525,21 +525,37 @@ public sealed class UpdateServiceTests
     private static async Task DeleteDirectoryWithRetryAsync(string path, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
-        while (Directory.Exists(path))
+        while (Directory.Exists(path) && DateTime.UtcNow < deadline)
         {
             try
             {
                 Directory.Delete(path, recursive: true);
                 return;
             }
-            catch (IOException) when (DateTime.UtcNow < deadline)
+            catch (IOException)
             {
-                await Task.Delay(50);
             }
-            catch (UnauthorizedAccessException) when (DateTime.UtcNow < deadline)
+            catch (UnauthorizedAccessException)
             {
-                await Task.Delay(50);
             }
+
+            await Task.Delay(50);
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // Test cleanup must not fail an otherwise valid updater assertion.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Antivirus and Windows shell services may release handles after process exit.
         }
     }
 
