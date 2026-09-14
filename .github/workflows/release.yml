@@ -67,8 +67,19 @@ jobs:
       - name: Build
         run: dotnet build QHHDesktopStorageBox.sln --configuration Release --no-restore --nologo
 
-      - name: Test
-        run: dotnet test QHHDesktopStorageBox.sln --configuration Release --no-build --nologo
+      - name: Test Core
+        run: >-
+          dotnet test tests/QHHDesktopStorageBox.Core.Tests/QHHDesktopStorageBox.Core.Tests.csproj
+          --configuration Release
+          --no-build
+          --nologo
+
+      - name: Test App
+        run: >-
+          dotnet test tests/QHHDesktopStorageBox.App.Tests/QHHDesktopStorageBox.App.Tests.csproj
+          --configuration Release
+          --no-build
+          --nologo
 
       - name: Decode signing certificate
         if: ${{ env.SIGNING_CERTIFICATE_BASE64 != '' && env.SIGNING_CERTIFICATE_PASSWORD != '' }}
