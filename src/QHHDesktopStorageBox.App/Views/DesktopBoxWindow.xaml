@@ -215,7 +215,7 @@
                             ToolTip="添加系统应用"
                             Margin="0,0,4,0"
                             Style="{StaticResource MappingModeButtonStyle}">
-                        <Path Data="M 8,2 L 8,14 M 2,8 L 14,8"
+                        <Path Data="{DynamicResource LineIconPlus}"
                               Stroke="{DynamicResource TextMutedBrush}"
                               StrokeThickness="1.7"
                               StrokeStartLineCap="Round"
@@ -237,7 +237,7 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
-                        <Path Data="M 2,2 L 7,2 L 7,7 L 2,7 Z M 10,2 L 15,2 L 15,7 L 10,7 Z M 2,10 L 7,10 L 7,15 L 2,15 Z M 10,10 L 15,10 L 15,15 L 10,15 Z"
+                        <Path Data="{DynamicResource LineIconGrid}"
                               Stroke="{DynamicResource TextMutedBrush}"
                               StrokeThickness="1.4"
                               Width="12"
@@ -256,7 +256,7 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
-                        <Path Data="M 3,4 L 15,4 M 3,8 L 15,8 M 3,12 L 15,12"
+                        <Path Data="{DynamicResource LineIconList}"
                               Stroke="{DynamicResource TextMutedBrush}"
                               StrokeThickness="1.7"
                               StrokeStartLineCap="Round"
@@ -289,7 +289,7 @@
                             </Style.Triggers>
                         </Style>
                     </Button.Style>
-                    <Path Data="M 2,6 L 7,11 L 12,6"
+                    <Path Data="{DynamicResource LineIconChevronDown}"
                           Stroke="{DynamicResource TextMutedBrush}"
                           StrokeThickness="1.6"
                           StrokeStartLineCap="Round"

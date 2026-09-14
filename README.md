@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml"><img src="https://github.com/honghao919/QHHDesktopStorageBox/actions/workflows/ci.yml/badge.svg" alt="Windows CI" /></a>
   <a href="https://github.com/honghao919/QHHDesktopStorageBox/releases/latest"><img src="https://img.shields.io/github/v/release/honghao919/QHHDesktopStorageBox?display_name=tag" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/version-1.3.14-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.3.15-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange" alt="License" />
   <img src="https://img.shields.io/badge/docs%20%26%20assets-CC%20BY--NC--SA%204.0-lightgrey" alt="Docs & Assets License" />
   <img src="https://img.shields.io/badge/.NET-10.0-purple" alt=".NET" />
@@ -45,6 +45,8 @@ English: QHH Desktop Storage Box is a lightweight Windows desktop file drawer bu
 - **可调透明度** — 可分别调节桌面盒子、盒子边线和图标背景框透明度
 - **开机自启动** — 可在设置中开启/关闭
 - **检查更新** — 自动检测 GitHub Releases 新版本
+- **启动自动更新检查** — 启动后自动检查最新版本，发现更新时提示下载；检测间隔为 12 小时
+- **统一线性图标** — 主要窗口、导航、视图切换和右键菜单使用圆角线性图标；图形依据 iconfont 公开合集风格独立绘制，不直接嵌入第三方素材
 - **原位还原删除** — 删除收纳项或收纳盒时，普通/像素盒文件恢复到原来的位置；原位置不可用则回退到桌面，重名自动加后缀；映射盒只删除引用
 - **窗口恢复** — 可从主页收纳盒菜单恢复单个窗口，或从系统托盘显示全部收纳盒
 - **桌面图标隐藏** — 可在设置中隐藏 Windows 桌面文件、文件夹和快捷方式；也可启用双击桌面空白区域快速切换，不移动或删除文件

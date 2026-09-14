@@ -8,7 +8,6 @@
         <infra:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
         <infra:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" />
         <infra:BoxVisualStyleEqualityConverter x:Key="BoxVisualStyleEqualityConverter" />
-
         <Color x:Key="AppBackgroundColor">#F5F5F7</Color>
         <Color x:Key="PanelColor">#FFFFFF</Color>
         <Color x:Key="PanelAltColor">#F2F2F7</Color>

@@ -28,6 +28,8 @@ public sealed class MainViewModel : ObservableObject
     internal const string DesktopDoubleClickSettingKey = "DesktopDoubleClickToggle";
     internal const string IconToolTipCompactSettingKey = "IconToolTipCompact";
     internal const string AboutPageShownSettingKey = "AboutPageShown";
+    internal const string AutomaticUpdateCheckSettingKey = "AutomaticUpdateCheckUtc";
+    internal static readonly TimeSpan AutomaticUpdateCheckInterval = TimeSpan.FromHours(12);
     private const string StartupRegistryKeyName = "QHHDesktopStorageBox";
     private const string LegacyStartupRegistryKeyName = "WitchDrawer";
 
@@ -156,7 +158,8 @@ public sealed class MainViewModel : ObservableObject
             new AsyncRelayCommand(() => ApplyAutoHideRevealScopeAsync(AutoHideRevealScope.HoveredBoxOnly));
         ApplyAutoHideScopeAllCommand =
             new AsyncRelayCommand(() => ApplyAutoHideRevealScopeAsync(AutoHideRevealScope.AllBoxes));
-        CheckForUpdateCommand = new AsyncRelayCommand(CheckForUpdateAsync);
+        CheckForUpdateCommand = new AsyncRelayCommand(
+            () => CheckForUpdateAsync(showFailureStatus: true));
         UndoLastFileOperationCommand = new AsyncRelayCommand(
             UndoLastFileOperationAsync,
             () => RecentFileOperations.Any(operation => operation.UndoneAt is null) && !IsBusy);
@@ -2371,11 +2374,51 @@ public sealed class MainViewModel : ObservableObject
             : AppThemeManager.DefaultBoxOpacity;
     }
 
-    private async Task CheckForUpdateAsync()
+    public async Task CheckForUpdatesOnStartupAsync()
+    {
+        try
+        {
+            var value = await _drawerService.GetSettingAsync(AutomaticUpdateCheckSettingKey);
+            var lastCheck = DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var parsed)
+                ? parsed
+                : (DateTimeOffset?)null;
+            if (!ShouldCheckForUpdates(lastCheck, DateTimeOffset.UtcNow))
+            {
+                return;
+            }
+
+            var succeeded = await CheckForUpdateAsync(showFailureStatus: false);
+            if (succeeded)
+            {
+                await _drawerService.SetSettingAsync(
+                    AutomaticUpdateCheckSettingKey,
+                    DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Automatic update check failed.");
+        }
+    }
+
+    internal static bool ShouldCheckForUpdates(
+        DateTimeOffset? lastCheck,
+        DateTimeOffset now)
+    {
+        return lastCheck is null
+            || lastCheck > now
+            || now - lastCheck.Value >= AutomaticUpdateCheckInterval;
+    }
+
+    private async Task<bool> CheckForUpdateAsync(bool showFailureStatus)
     {
         if (IsCheckingUpdate)
         {
-            return;
+            return false;
         }
 
         try
@@ -2385,12 +2428,22 @@ public sealed class MainViewModel : ObservableObject
 
             var currentVersion = GetCurrentVersion();
             var result = await _updateService.CheckForUpdateAsync(currentVersion);
+            if (!result.IsSuccessful)
+            {
+                if (showFailureStatus)
+                {
+                    UpdateStatusText = "检查更新失败";
+                    StatusText = UpdateStatusText;
+                }
+
+                return false;
+            }
 
             if (!result.HasUpdate)
             {
                 UpdateStatusText = $"已是最新版本 v{currentVersion.Major}.{currentVersion.Minor}.{currentVersion.Build}";
                 StatusText = UpdateStatusText;
-                return;
+                return true;
             }
 
             var versionText = $"v{result.LatestVersion.Major}.{result.LatestVersion.Minor}.{result.LatestVersion.Build}";
@@ -2399,12 +2452,18 @@ public sealed class MainViewModel : ObservableObject
             _pendingUpdateSha256 = result.ExpectedSha256;
 
             UpdateRequested?.Invoke(this, result);
+            return true;
         }
         catch (Exception exception)
         {
             _logger.Error(exception, "Update check failed.");
-            UpdateStatusText = "检查更新失败";
-            StatusText = UpdateStatusText;
+            if (showFailureStatus)
+            {
+                UpdateStatusText = "检查更新失败";
+                StatusText = UpdateStatusText;
+            }
+
+            return false;
         }
         finally
         {
