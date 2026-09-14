@@ -128,7 +128,7 @@
                             Style="{StaticResource GhostButtonStyle}"
                             Click="OnMinimizeClicked"
                             ToolTip="最小化">
-                        <Path Data="M 1,5 L 11,5"
+                        <Path Data="{DynamicResource LineIconMinimize}"
                               Stroke="{DynamicResource TextMutedBrush}"
                               StrokeThickness="1.4"
                               Width="12"
@@ -152,7 +152,7 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
-                        <Path Data="M 1,1 L 11,11 M 11,1 L 1,11"
+                        <Path Data="{DynamicResource LineIconClose}"
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                               StrokeThickness="1.4"
                               Width="12"
@@ -419,7 +419,7 @@
                                                              Stretch="Uniform">
                                                         <Canvas Width="18" Height="18">
                                                             <Path Style="{StaticResource SidebarBoxIconPathStyle}"
-                                                                  Data="M 3.75,7.15 L 14.25,7.15 L 13.9,13.95 C 13.85,14.85 13.1,15.55 12.2,15.55 L 5.8,15.55 C 4.9,15.55 4.15,14.85 4.1,13.95 Z M 3.3,3.15 L 14.7,3.15 C 15.3,3.15 15.8,3.65 15.8,4.25 L 15.8,5.75 C 15.8,6.35 15.3,6.85 14.7,6.85 L 3.3,6.85 C 2.7,6.85 2.2,6.35 2.2,5.75 L 2.2,4.25 C 2.2,3.65 2.7,3.15 3.3,3.15 Z M 7,10.35 L 11,10.35" />
+                                                                  Data="{DynamicResource LineIconBox}" />
                                                         </Canvas>
                                                     </Viewbox>
                                                     <Viewbox x:Name="MappingBoxIcon"
@@ -429,7 +429,7 @@
                                                              Visibility="Collapsed">
                                                         <Canvas Width="18" Height="18">
                                                             <Path Style="{StaticResource SidebarBoxIconPathStyle}"
-                                                                  Data="M 7.4,11.5 L 5.8,13.1 C 4.7,14.2 3,14.2 1.9,13.1 C 0.8,12 0.8,10.3 1.9,9.2 L 4.4,6.7 C 5.5,5.6 7.2,5.6 8.3,6.7 M 10.6,6.5 L 12.2,4.9 C 13.3,3.8 15,3.8 16.1,4.9 C 17.2,6 17.2,7.7 16.1,8.8 L 13.6,11.3 C 12.5,12.4 10.8,12.4 9.7,11.3 M 6.6,11.4 L 11.4,6.6" />
+                                                                  Data="{DynamicResource LineIconMapping}" />
                                                         </Canvas>
                                                     </Viewbox>
                                                     <Viewbox x:Name="TodoBoxIcon"
@@ -439,7 +439,7 @@
                                                              Visibility="Collapsed">
                                                         <Canvas Width="18" Height="18">
                                                             <Path Style="{StaticResource SidebarBoxIconPathStyle}"
-                                                                  Data="M 5.15,2.35 L 12.85,2.35 C 14.4,2.35 15.65,3.6 15.65,5.15 L 15.65,12.85 C 15.65,14.4 14.4,15.65 12.85,15.65 L 5.15,15.65 C 3.6,15.65 2.35,14.4 2.35,12.85 L 2.35,5.15 C 2.35,3.6 3.6,2.35 5.15,2.35 Z M 5.45,9.15 L 8.05,11.75 L 12.85,6.55" />
+                                                                  Data="{DynamicResource LineIconTodo}" />
                                                         </Canvas>
                                                     </Viewbox>
                                                     <Viewbox x:Name="DrawerBoxIcon"
@@ -448,18 +448,8 @@
                                                              Stretch="Uniform"
                                                              Visibility="Collapsed">
                                                         <Canvas Width="18" Height="18">
-                                                            <Rectangle Canvas.Left="3.25"
-                                                                       Canvas.Top="3.25"
-                                                                       Style="{StaticResource SidebarBoxIconCellStyle}" />
-                                                            <Rectangle Canvas.Left="10.5"
-                                                                       Canvas.Top="3.25"
-                                                                       Style="{StaticResource SidebarBoxIconCellStyle}" />
-                                                            <Rectangle Canvas.Left="3.25"
-                                                                       Canvas.Top="10.5"
-                                                                       Style="{StaticResource SidebarBoxIconCellStyle}" />
-                                                            <Rectangle Canvas.Left="10.5"
-                                                                       Canvas.Top="10.5"
-                                                                       Style="{StaticResource SidebarBoxIconCellStyle}" />
+                                                            <Path Style="{StaticResource SidebarBoxIconPathStyle}"
+                                                                  Data="{DynamicResource LineIconDrawer}" />
                                                         </Canvas>
                                                     </Viewbox>
                                                     <Viewbox x:Name="InboxBoxIcon"
@@ -469,7 +459,7 @@
                                                              Visibility="Collapsed">
                                                         <Canvas Width="18" Height="18">
                                                             <Path Style="{StaticResource SidebarBoxIconPathStyle}"
-                                                                  Data="M 2.5,3 L 15.5,3 L 15.5,15 L 2.5,15 Z M 3,10 L 6,10 L 7,12 L 11,12 L 12,10 L 15,10 M 7,5 L 7,9 M 5,7 L 7,9 L 9,7" />
+                                                                  Data="{DynamicResource LineIconInbox}" />
                                                         </Canvas>
                                                     </Viewbox>
                                                     <Viewbox x:Name="SmartBoxIcon"
@@ -479,7 +469,7 @@
                                                              Visibility="Collapsed">
                                                         <Canvas Width="18" Height="18">
                                                             <Path Style="{StaticResource SidebarBoxIconPathStyle}"
-                                                                  Data="M 9,2 L 10.4,6.2 L 14.7,7.6 L 10.4,9 L 9,13.2 L 7.6,9 L 3.3,7.6 L 7.6,6.2 Z M 4,12.5 L 4,16 M 2,14 L 6,14 M 14,12.5 L 14,16 M 12,14 L 16,14" />
+                                                                  Data="{DynamicResource LineIconSmart}" />
                                                         </Canvas>
                                                     </Viewbox>
                                                 </Grid>
@@ -530,7 +520,7 @@
                                     AutomationProperties.Name="新建"
                                     MinHeight="40">
                                 <StackPanel Orientation="Horizontal">
-                                    <Path Data="M 0,4 L 8,4 M 4,0 L 4,8" Stroke="White" StrokeThickness="1.5" Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True" />
+                                    <Path Data="{DynamicResource LineIconPlus}" Stroke="White" StrokeThickness="1.5" Width="8" Height="8" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,0" SnapsToDevicePixels="True" />
                                     <TextBlock Text="新建" VerticalAlignment="Center" FontSize="12.5" />
                                 </StackPanel>
                             </Button>
@@ -577,7 +567,7 @@
                                         Style="{StaticResource NavArchiveButtonStyle}"
                                         AutomationProperties.Name="归档">
                                     <StackPanel Orientation="Horizontal">
-                                        <Path Data="M 2,5 L 17,5 L 17,17 L 2,17 Z M 1,2 L 18,2 L 18,6 L 1,6 Z M 7,9 L 12,9"
+                                        <Path Data="{DynamicResource LineIconArchive}"
                                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                               StrokeThickness="1.4"
                                               Width="14"
@@ -596,7 +586,7 @@
                                         Style="{StaticResource NavSettingsButtonStyle}"
                                         AutomationProperties.Name="设置">
                                     <StackPanel Orientation="Horizontal">
-                                        <Path Data="M 9.5,2 L 11,2.5 L 11.8,5 L 14.2,5.8 L 16.5,4.7 L 17.5,6 L 16,8.2 L 16,10.8 L 17.5,13 L 16.5,14.3 L 14.2,13.2 L 11.8,14 L 11,16.5 L 9.5,17 L 8,16.5 L 7.2,14 L 4.8,13.2 L 2.5,14.3 L 1.5,13 L 3,10.8 L 3,8.2 L 1.5,6 L 2.5,4.7 L 4.8,5.8 L 7.2,5 L 8,2.5 Z M 7,9.5 A 2.5,2.5 0 1 0 12,9.5 A 2.5,2.5 0 1 0 7,9.5"
+                                        <Path Data="{DynamicResource LineIconSettings}"
                                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                               StrokeThickness="1.25"
                                               Width="14"

@@ -3,6 +3,21 @@
 All notable changes are documented here. The product version is defined in
 `Directory.Build.props`.
 
+## [1.3.15] - 2026-09-14
+
+### Added
+
+- Automatic update checks after normal startup. The app checks at most once
+  every 12 hours and prompts when a newer GitHub Release is available.
+- A consistent rounded line-icon set for navigation, box types, view switches,
+  application picker actions, and item context menus.
+
+### Changed
+
+- Startup update checks run in the background and do not block window loading.
+- Silent startup skips update prompts, while the Settings page can still check
+  manually.
+
 ## [1.3.14] - 2026-09-14
 
 ### Added

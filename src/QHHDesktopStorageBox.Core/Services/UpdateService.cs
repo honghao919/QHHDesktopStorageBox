@@ -86,6 +86,7 @@ public sealed class UpdateService
 
             return new UpdateCheckResult
             {
+                IsSuccessful = true,
                 HasUpdate = hasUpdate,
                 LatestVersion = remoteVersion,
                 ReleaseNotes = TruncateReleaseNotes(response.Body, 500),

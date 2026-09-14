@@ -2,6 +2,8 @@ namespace QHHDesktopStorageBox.Core.Services;
 
 public sealed class UpdateCheckResult
 {
+    public bool IsSuccessful { get; init; }
+
     public bool HasUpdate { get; init; }
 
     public Version LatestVersion { get; init; } = new(0, 0, 0);

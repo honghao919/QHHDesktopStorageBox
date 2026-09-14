@@ -31,6 +31,17 @@ public partial class App : Application
     private IAppLogger? _logger;
     private int _shutdownStarted;
 
+    public App()
+    {
+        InitializeComponent();
+        Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri(
+                "pack://application:,,,/QHHDesktopStorageBox.App;component/Views/Styles/LineIcons.xaml",
+                UriKind.Absolute)
+        });
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -277,6 +288,13 @@ public partial class App : Application
             await mainViewModel.LoadAsync();
             await _desktopBoxManager.RefreshAsync();
             await updateService.ConfirmUpdateStartupAsync();
+            if (!silentStart)
+            {
+                FireAndForget.Run(
+                    mainViewModel.CheckForUpdatesOnStartupAsync(),
+                    logger,
+                    "Failed to run the automatic startup update check.");
+            }
         }
         catch (Exception exception)
         {

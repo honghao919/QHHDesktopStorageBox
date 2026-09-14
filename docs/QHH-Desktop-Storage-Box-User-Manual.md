@@ -1,6 +1,6 @@
 # QHH Desktop Storage Box 用户说明书
 
-版本：1.3.14
+版本：1.3.15
 
 适用平台：Windows 10 / 11 x64
 
@@ -21,14 +21,14 @@ QHH Desktop Storage Box 是一款基于原生 WPF 构建的轻量级 Windows 桌
 
 ### 安装版
 
-1. 双击 `QHHDesktopStorageBox-Setup-v1.3.14-x64.exe`。
+1. 双击 `QHHDesktopStorageBox-Setup-v1.3.15-x64.exe`。
 2. 按安装向导完成安装。
 3. 可选择创建桌面图标和开机启动。
 4. 从开始菜单或桌面图标启动 QHH Desktop Storage Box。
 
 ### 便携版
 
-1. 解压 `QHHDesktopStorageBox-v1.3.14-win-x64.zip`。
+1. 解压 `QHHDesktopStorageBox-v1.3.15-win-x64.zip`。
 2. 运行 `QHHDesktopStorageBox.App.exe`。
 3. 不要单独移动 EXE 文件。ZIP 内可能有 WPF 运行所需的附属文件，应保持目录完整。
 
@@ -260,6 +260,13 @@ Ctrl + Alt + W
 ## 8. 更新
 
 应用会从 GitHub Releases 检查新版本。下载更新前会进行域名限制和 SHA-256 校验。
+
+正常启动后，应用会自动检查最新版本：
+
+- 自动检查最多每 12 小时执行一次。
+- 发现新版本时会提示是否下载并更新。
+- 开机静默启动不会弹出更新窗口，可在设置页手动检查。
+- 网络失败不会影响应用启动或文件操作。
 
 更新流程：
 
